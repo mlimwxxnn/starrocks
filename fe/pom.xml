@@ -24,6 +24,7 @@ under the License.
     <modelVersion>4.0.0</modelVersion>
 
     <groupId>com.starrocks</groupId>
+
     <artifactId>starrocks-fe</artifactId>
     <version>3.4.0</version>
     <packaging>pom</packaging>
