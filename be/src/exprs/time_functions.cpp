@@ -2108,7 +2108,7 @@ std::string TimeFunctions::info_reported_by_time_slice = "time used with time_sl
 
 static int weekday_from_dow(const std::string& dow) {
     const int err_tag = -1, base = 1000;
-    if(dow.length() < 2) {
+    if (dow.length() < 2) {
         return err_tag;
     }
     switch (dow[0] + dow[1] * base) {
@@ -2119,7 +2119,7 @@ static int weekday_from_dow(const std::string& dow) {
     case 'T' + 'u' * base:
         return (dow == "Tu" || dow == "Tue" || dow == "Tuesday") ? 2 : err_tag;
     case 'W' + 'e' * base:
-        return (dow == "We" || dow == "Wed" || dow == "Wednesday") ? 3 :err_tag;
+        return (dow == "We" || dow == "Wed" || dow == "Wednesday") ? 3 : err_tag;
     case 'T' + 'h' * base:
         return (dow == "Th" || dow == "Thu" || dow == "Thursday") ? 4 : err_tag;
     case 'F' + 'r' * base:
