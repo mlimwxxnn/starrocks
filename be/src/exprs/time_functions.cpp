@@ -2131,6 +2131,7 @@ static int weekday_from_dow_abbreviation(const std::string& dow) {
     }
 }
 
+<<<<<<< HEAD
 // next_day
 StatusOr<ColumnPtr> TimeFunctions::next_day(FunctionContext* context, const Columns& columns) {
     RETURN_IF_COLUMNS_ONLY_NULL(columns);
@@ -2222,6 +2223,8 @@ Status TimeFunctions::next_day_close(FunctionContext* context, FunctionContext::
     return Status::OK();
 }
 
+=======
+>>>>>>> 1d3946a4e94e596b4072081d53830ee787c3ed27
 // previous_day
 StatusOr<ColumnPtr> TimeFunctions::previous_day(FunctionContext* context, const Columns& columns) {
     RETURN_IF_COLUMNS_ONLY_NULL(columns);
