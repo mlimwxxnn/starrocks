@@ -18,6 +18,7 @@
 #include "exprs/agg/factory/aggregate_resolver.hpp"
 #include "exprs/agg/sum.h"
 #include "types/logical_type.h"
+#include "exprs/agg/count_if.h"
 
 namespace starrocks {
 
@@ -69,6 +70,22 @@ struct DistinctDispatcher {
     }
 };
 
+VALUE_GUARD(LogicalType, CountIfLTGuard, lt_is_count_if_support, TYPE_BOOLEAN, TYPE_TINYINT, TYPE_SMALLINT, TYPE_INT,
+            TYPE_BIGINT, TYPE_LARGEINT, TYPE_FLOAT, TYPE_DOUBLE, TYPE_DECIMAL, TYPE_DECIMALV2, TYPE_DECIMAL32,
+            TYPE_DECIMAL64, TYPE_DECIMAL128);
+
+struct CountIfDispatcher {
+    template <LogicalType lt>
+    void operator()(AggregateFuncResolver* resolver) {
+        if constexpr (lt_is_count_if_support<lt>){
+            resolver->add_aggregate_mapping<lt, TYPE_BIGINT, CountIfFunctionState<lt>>
+                    ("count_if", false, AggregateFactory::MakeCountIfAggregateFunction<lt>());
+            resolver->add_aggregate_mapping<lt, TYPE_BIGINT, CountIfFunctionState<lt>>
+                    ("count_if", true, AggregateFactory::MakeCountIfAggregateFunction<lt>());
+        }
+    }
+};
+
 void AggregateFuncResolver::register_sumcount() {
     for (auto type : aggregate_types()) {
         type_dispatch_all(type, SumDispatcher(), this);
@@ -80,6 +97,24 @@ void AggregateFuncResolver::register_sumcount() {
     for (auto type : aggregate_types()) {
         type_dispatch_all(type, StorageSumDispatcher(), this);
     }
+
+    // count_if
+    for (auto type : aggregate_types()) {
+        type_dispatch_all(type, CountIfDispatcher(), this);
+    }
+//    add_aggregate_mapping<TYPE_TINYINT, TYPE_BIGINT, CountIfFunctionState<TYPE_TINYINT, false>>
+//            ("count_if", false, AggregateFactory::MakeCountIfAggregateFunction<TYPE_TINYINT, false>());
+//    add_aggregate_mapping<TYPE_SMALLINT, TYPE_BIGINT, CountIfFunctionState<TYPE_SMALLINT, false>>
+//            ("count_if", false, AggregateFactory::MakeCountIfAggregateFunction<TYPE_SMALLINT, false>());
+//    add_aggregate_mapping<TYPE_INT, TYPE_BIGINT, CountIfFunctionState<TYPE_INT, false>>
+//            ("count_if", false, AggregateFactory::MakeCountIfAggregateFunction<TYPE_INT, false>());
+//    add_aggregate_mapping<TYPE_BIGINT, TYPE_BIGINT, CountIfFunctionState<TYPE_BIGINT, false>>
+//            ("count_if", false, AggregateFactory::MakeCountIfAggregateFunction<TYPE_BIGINT, false>());
+//    add_aggregate_mapping<TYPE_BOOLEAN, TYPE_BIGINT, CountIfFunctionState<TYPE_BOOLEAN, false>>
+//            ("count_if", false, AggregateFactory::MakeCountIfAggregateFunction<TYPE_BOOLEAN, false>());
+
+
+
 
     _infos_mapping.emplace(std::make_tuple("count", TYPE_BIGINT, TYPE_BIGINT, false, false),
                            AggregateFactory::MakeCountAggregateFunction<false>());
