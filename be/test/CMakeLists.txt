@@ -131,6 +131,7 @@ set(EXEC_FILES
         ./formats/csv/decimalv2_converter_test.cpp
         ./formats/csv/float_converter_test.cpp
         ./formats/csv/json_converter_test.cpp
+        ./formats/csv/map_converter_test.cpp
         ./formats/csv/nullable_converter_test.cpp
         ./formats/csv/numeric_converter_test.cpp
         ./formats/csv/default_value_converter_test.cpp
@@ -152,7 +153,9 @@ set(EXEC_FILES
         ./formats/parquet/metadata_test.cpp
         ./formats/parquet/group_reader_test.cpp
         ./formats/parquet/file_reader_test.cpp
+        ./formats/parquet/file_writer_test.cpp
         ./formats/parquet/iceberg_schema_evolution_file_reader_test.cpp
+        ./formats/parquet/column_converter_test.cpp
         ./formats/parquet/parquet_footer_test.cpp
         ./geo/geo_types_test.cpp
         ./geo/wkt_parse_test.cpp
@@ -206,6 +209,7 @@ set(EXEC_FILES
         ./storage/lake/primary_key_publish_test.cpp
         ./storage/rowset_update_state_test.cpp
         ./storage/rowset_column_update_state_test.cpp
+        ./storage/rowset_column_partial_update_test.cpp
         ./storage/rowset/rowset_test.cpp
         ./storage/rowset/binary_dict_page_test.cpp
         ./storage/rowset/binary_plain_page_test.cpp
@@ -300,6 +304,7 @@ set(EXEC_FILES
         ./runtime/memory_scratch_sink_test_issue_8676.cpp
         ./runtime/memory_scratch_sink_test.cpp
         ./runtime/command_executor_test.cpp
+        ./runtime/exec_env_test.cpp
         ./serde/column_array_serde_test.cpp
         ./serde/protobuf_serde_test.cpp
         ./types/bitmap_value_test.cpp

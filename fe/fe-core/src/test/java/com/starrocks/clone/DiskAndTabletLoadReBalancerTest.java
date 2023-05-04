@@ -18,7 +18,6 @@ package com.starrocks.clone;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
-import com.google.common.collect.Sets;
 import com.starrocks.catalog.DataProperty;
 import com.starrocks.catalog.Database;
 import com.starrocks.catalog.DiskInfo;
@@ -181,7 +180,7 @@ public class DiskAndTabletLoadReBalancerTest {
 
         // set Config.balance_load_disk_safe_threshold to 0.9 to trigger tablet balance
         Config.tablet_sched_balance_load_disk_safe_threshold = 0.9;
-        Config.storage_flood_stage_left_capacity_bytes = 1;
+        Config.storage_usage_soft_limit_reserve_bytes = 1;
         tablets = rebalancer.selectAlternativeTablets();
         Assert.assertEquals(2, tablets.size());
         Assert.assertTrue(tablets.stream().allMatch(t -> (t.getDestBackendId() == beId3)));
@@ -330,7 +329,7 @@ public class DiskAndTabletLoadReBalancerTest {
 
         // set Config.balance_load_disk_safe_threshold to 0.9 to trigger tablet balance
         Config.tablet_sched_balance_load_disk_safe_threshold = 0.9;
-        Config.storage_flood_stage_left_capacity_bytes = 1;
+        Config.storage_usage_soft_limit_reserve_bytes = 1;
         tablets = rebalancer.selectAlternativeTablets();
         Assert.assertEquals(0, tablets.size());
     }
@@ -507,7 +506,7 @@ public class DiskAndTabletLoadReBalancerTest {
 
         // set Config.balance_load_disk_safe_threshold to 0.4 to trigger backend disk balance
         Config.tablet_sched_balance_load_disk_safe_threshold = 0.4;
-        Config.storage_flood_stage_left_capacity_bytes = 1;
+        Config.storage_usage_soft_limit_reserve_bytes = 1;
         List<TabletSchedCtx> tablets = rebalancer.selectAlternativeTablets();
         Assert.assertEquals(2, tablets.size());
         Assert.assertTrue(tablets.stream().allMatch(t -> (t.getDestBackendId() == beId1)));
@@ -772,13 +771,13 @@ public class DiskAndTabletLoadReBalancerTest {
         Assert.assertEquals((Integer) 4, hState.pathSortIndex.get(pathHash14));
         Assert.assertEquals(10 * tabletDataSize, hState.usedCapacity);
 
-        List<Long> highLoadPaths = hState.getTabletsInHighLoadPath(Sets.newHashSet(tabletId1, tabletId2));
+        List<Long> highLoadPaths = hState.getTabletsInHighLoadPath(Lists.newArrayList(tabletId1, tabletId2));
         Assert.assertEquals(1, highLoadPaths.size());
         Assert.assertEquals((Long) tabletId1, highLoadPaths.get(0));
 
         // change threshold to 0.3, tabletId2 will be chosen
         Config.tablet_sched_balance_load_score_threshold = 0.3;
-        highLoadPaths = hState.getTabletsInHighLoadPath(Sets.newHashSet(tabletId1, tabletId2));
+        highLoadPaths = hState.getTabletsInHighLoadPath(Lists.newArrayList(tabletId1, tabletId2));
         Assert.assertEquals(2, highLoadPaths.size());
         Assert.assertEquals((Long) tabletId1, highLoadPaths.get(0));
         Assert.assertEquals((Long) tabletId2, highLoadPaths.get(1));
@@ -795,7 +794,7 @@ public class DiskAndTabletLoadReBalancerTest {
         Assert.assertEquals((Integer) 2, hState.pathSortIndex.get(pathHash13));
         Assert.assertEquals(6 * tabletDataSize, hState.usedCapacity);
         // only tabletId2 will be chosen
-        highLoadPaths = hState.getTabletsInHighLoadPath(Sets.newHashSet(tabletId1, tabletId2));
+        highLoadPaths = hState.getTabletsInHighLoadPath(Lists.newArrayList(tabletId1, tabletId2));
         Assert.assertEquals(1, highLoadPaths.size());
         Assert.assertEquals((Long) tabletId2, highLoadPaths.get(0));
 

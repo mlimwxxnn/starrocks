@@ -511,6 +511,7 @@ void OlapScanNode::_init_counter(RuntimeState* state) {
 
     _get_rowsets_timer = ADD_TIMER(_scan_profile, "GetRowsets");
     _get_delvec_timer = ADD_TIMER(_scan_profile, "GetDelVec");
+    _get_delta_column_group_timer = ADD_TIMER(_scan_profile, "GetDeltaColumnGroup");
 
     /// SegmentInit
     _seg_init_timer = ADD_TIMER(_scan_profile, "SegmentInit");
@@ -642,6 +643,10 @@ Status OlapScanNode::_start_scan_thread(RuntimeState* state) {
             scanner_params.skip_aggregation = _olap_scan_node.is_preaggregation;
             scanner_params.need_agg_finalize = true;
             scanner_params.unused_output_columns = &_unused_output_columns;
+            // one scan range has multi tablet_scanners, so only the first scanner need to update scan range
+            if (i == 0) {
+                scanner_params.update_num_scan_range = true;
+            }
             auto* scanner = _pool->add(new TabletScanner(this));
             RETURN_IF_ERROR(scanner->init(state, scanner_params));
             // Assume all scanners have the same schema.

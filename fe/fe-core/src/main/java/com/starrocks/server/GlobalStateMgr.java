@@ -122,7 +122,7 @@ import com.starrocks.common.ThreadPoolManager;
 import com.starrocks.common.UserException;
 import com.starrocks.common.io.Writable;
 import com.starrocks.common.util.Daemon;
-import com.starrocks.common.util.LeaderDaemon;
+import com.starrocks.common.util.FrontendDaemon;
 import com.starrocks.common.util.PrintableMap;
 import com.starrocks.common.util.PropertyAnalyzer;
 import com.starrocks.common.util.QueryableReentrantLock;
@@ -144,6 +144,7 @@ import com.starrocks.ha.FrontendNodeType;
 import com.starrocks.ha.HAProtocol;
 import com.starrocks.ha.LeaderInfo;
 import com.starrocks.ha.StateChangeExecution;
+import com.starrocks.healthchecker.SafeModeChecker;
 import com.starrocks.journal.Journal;
 import com.starrocks.journal.JournalCursor;
 import com.starrocks.journal.JournalEntity;
@@ -350,9 +351,9 @@ public class GlobalStateMgr {
     private DeleteHandler deleteHandler;
     private UpdateDbUsedDataQuotaDaemon updateDbUsedDataQuotaDaemon;
 
-    private LeaderDaemon labelCleaner; // To clean old LabelInfo, ExportJobInfos
-    private LeaderDaemon txnTimeoutChecker; // To abort timeout txns
-    private LeaderDaemon taskCleaner;   // To clean expire Task/TaskRun
+    private FrontendDaemon labelCleaner; // To clean old LabelInfo, ExportJobInfos
+    private FrontendDaemon txnTimeoutChecker; // To abort timeout txns
+    private FrontendDaemon taskCleaner;   // To clean expire Task/TaskRun
     private JournalWriter journalWriter; // leader only: write journal log
     private Daemon replayer;
     private Daemon timePrinter;
@@ -371,6 +372,9 @@ public class GlobalStateMgr {
 
     // false if default_cluster is not created.
     private boolean isDefaultClusterCreated = false;
+
+    // false if default_warehouse is not created.
+    private boolean isDefaultWarehouseCreated = false;
 
     private FrontendNodeType feType;
     // replica and observer use this value to decide provide read service or not
@@ -452,6 +456,8 @@ public class GlobalStateMgr {
 
     private final StatisticAutoCollector statisticAutoCollector;
 
+    private final SafeModeChecker safeModeChecker;
+
     private AnalyzeManager analyzeManager;
 
     private StatisticStorage statisticStorage;
@@ -459,6 +465,8 @@ public class GlobalStateMgr {
     private long imageJournalId;
 
     private long feStartTime;
+
+    private boolean isSafeMode = false;
 
     private ResourceGroupMgr resourceGroupMgr;
 
@@ -601,6 +609,7 @@ public class GlobalStateMgr {
         this.updateDbUsedDataQuotaDaemon = new UpdateDbUsedDataQuotaDaemon();
         this.statisticsMetaManager = new StatisticsMetaManager();
         this.statisticAutoCollector = new StatisticAutoCollector();
+        this.safeModeChecker = new SafeModeChecker();
         this.statisticStorage = new CachedStatisticStorage();
 
         this.replayedJournalId = new AtomicLong(0L);
@@ -717,6 +726,14 @@ public class GlobalStateMgr {
         }
     }
 
+    public boolean isSafeMode() {
+        return isSafeMode;
+    }
+
+    public void setSafeMode(boolean isSafeMode) {
+        this.isSafeMode = isSafeMode;
+    }
+
     public ConcurrentHashMap<Long, Database> getIdToDb() {
         return localMetastore.getIdToDb();
     }
@@ -794,6 +811,10 @@ public class GlobalStateMgr {
 
     public static StarOSAgent getCurrentStarOSAgent() {
         return getCurrentState().getStarOSAgent();
+    }
+
+    public static WarehouseManager getCurrentWarehouseMgr() {
+        return getCurrentState().getWarehouseMgr();
     }
 
     public static HeartbeatMgr getCurrentHeartbeatMgr() {
@@ -1055,6 +1076,7 @@ public class GlobalStateMgr {
                     // already upgraded, set auth = null
                     auth = null;
                 }
+
                 break;
             }
 
@@ -1113,6 +1135,7 @@ public class GlobalStateMgr {
         // Set the feType to LEADER before writing edit log, because the feType must be Leader when writing edit log.
         // It will be set to the old type if any error happens in the following procedure
         feType = FrontendNodeType.LEADER;
+
         try {
             // Log meta_version
             int communityMetaVersion = MetaContext.get().getMetaVersion();
@@ -1137,6 +1160,10 @@ public class GlobalStateMgr {
                 initDefaultCluster();
             }
 
+            if (!isDefaultWarehouseCreated) {
+                initDefaultWarehouse();
+            }
+
             // MUST set leader ip before starting checkpoint thread.
             // because checkpoint thread need this info to select non-leader FE to push image
             nodeMgr.setLeaderInfo();
@@ -1157,7 +1184,7 @@ public class GlobalStateMgr {
             // start all daemon threads that only running on MASTER FE
             startLeaderOnlyDaemonThreads();
             // start other daemon threads that should run on all FEs
-            startNonLeaderDaemonThreads();
+            startAllNodeTypeDaemonThreads();
             insertOverwriteJobManager.cancelRunningJobs();
 
             MetricRepo.init();
@@ -1263,10 +1290,15 @@ public class GlobalStateMgr {
         if (RunMode.allowCreateLakeTable()) {
             shardDeleter.start();
         }
+
+        if (Config.enable_safe_mode) {
+            LOG.info("Start safe mode checker!");
+            safeModeChecker.start();
+        }
     }
 
-    // start threads that should running on all FE
-    private void startNonLeaderDaemonThreads() {
+    // start threads that should run on all FE
+    private void startAllNodeTypeDaemonThreads() {
         tabletStatMgr.start();
         // load and export job label cleaner thread
         labelCleaner.start();
@@ -1308,7 +1340,7 @@ public class GlobalStateMgr {
             replayer.start();
         }
 
-        startNonLeaderDaemonThreads();
+        startAllNodeTypeDaemonThreads();
 
         MetricRepo.init();
 
@@ -1801,7 +1833,7 @@ public class GlobalStateMgr {
     }
 
     public void createLabelCleaner() {
-        labelCleaner = new LeaderDaemon("LoadLabelCleaner", Config.label_clean_interval_second * 1000L) {
+        labelCleaner = new FrontendDaemon("LoadLabelCleaner", Config.label_clean_interval_second * 1000L) {
             @Override
             protected void runAfterCatalogReady() {
                 clearExpiredJobs();
@@ -1810,7 +1842,7 @@ public class GlobalStateMgr {
     }
 
     public void createTaskCleaner() {
-        taskCleaner = new LeaderDaemon("TaskCleaner", Config.task_check_interval_second * 1000L) {
+        taskCleaner = new FrontendDaemon("TaskCleaner", Config.task_check_interval_second * 1000L) {
             @Override
             protected void runAfterCatalogReady() {
                 doTaskBackgroundJob();
@@ -1819,7 +1851,7 @@ public class GlobalStateMgr {
     }
 
     public void createTxnTimeoutChecker() {
-        txnTimeoutChecker = new LeaderDaemon("txnTimeoutChecker", Config.transaction_clean_interval_second) {
+        txnTimeoutChecker = new FrontendDaemon("txnTimeoutChecker", Config.transaction_clean_interval_second) {
             @Override
             protected void runAfterCatalogReady() {
                 globalTransactionMgr.abortTimeoutTxns();
@@ -2056,7 +2088,7 @@ public class GlobalStateMgr {
 
     public void createTimePrinter() {
         // time printer will write timestamp edit log every 10 seconds
-        timePrinter = new LeaderDaemon("timePrinter", 10 * 1000L) {
+        timePrinter = new FrontendDaemon("timePrinter", 10 * 1000L) {
             @Override
             protected void runAfterCatalogReady() {
                 Timestamp stamp = new Timestamp();
@@ -2358,11 +2390,6 @@ public class GlobalStateMgr {
                 sb.append(StatsConstants.TABLE_PROPERTY_SEPARATOR).append(PropertyAnalyzer.PROPERTIES_INMEMORY)
                         .append("\" = \"");
                 sb.append(olapTable.isInMemory()).append("\"");
-
-                // storage type
-                sb.append(StatsConstants.TABLE_PROPERTY_SEPARATOR).append(PropertyAnalyzer.PROPERTIES_STORAGE_FORMAT)
-                        .append("\" = \"");
-                sb.append(olapTable.getStorageFormat()).append("\"");
 
                 // enable_persistent_index
                 sb.append(StatsConstants.TABLE_PROPERTY_SEPARATOR)
@@ -3453,6 +3480,11 @@ public class GlobalStateMgr {
 
     public void initDefaultCluster() {
         localMetastore.initDefaultCluster();
+    }
+
+    public void initDefaultWarehouse() {
+        warehouseMgr.initDefaultWarehouse();
+        isDefaultWarehouseCreated = true;
     }
 
     public void replayUpdateClusterAndBackends(BackendIdsUpdateInfo info) {

@@ -286,6 +286,9 @@ void FragmentExecState::coordinator_callback(const Status& status, RuntimeProfil
         if (!runtime_state->get_error_log_file_path().empty()) {
             params.__set_tracking_url(to_load_error_http_path(runtime_state->get_error_log_file_path()));
         }
+        if (!runtime_state->get_rejected_record_file_path().empty()) {
+            params.__set_rejected_record_path(runtime_state->get_rejected_record_file_path());
+        }
         if (!runtime_state->export_output_files().empty()) {
             params.__isset.export_files = true;
             params.export_files = runtime_state->export_output_files();
@@ -894,6 +897,8 @@ Status FragmentMgr::exec_external_plan_fragment(const TScanOpenParams& params, c
     query_options.query_timeout = params.query_timeout;
     query_options.mem_limit = params.mem_limit;
     query_options.query_type = TQueryType::EXTERNAL;
+    // For spark sql / flink sql, we dont use page cache.
+    query_options.use_page_cache = false;
     exec_fragment_params.__set_query_options(query_options);
     VLOG_ROW << "external exec_plan_fragment params is "
              << apache::thrift::ThriftDebugString(exec_fragment_params).c_str();

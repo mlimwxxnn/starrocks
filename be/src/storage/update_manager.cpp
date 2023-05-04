@@ -122,12 +122,14 @@ static void search_delta_column_groups_by_version(const DeltaColumnGroupList& al
 
 Status UpdateManager::get_delta_column_group(KVStore* meta, const TabletSegmentId& tsid, int64_t version,
                                              DeltaColumnGroupList* dcgs) {
+    StarRocksMetrics::instance()->delta_column_group_get_total.increment(1);
     {
         // find in delta column group cache
         std::lock_guard<std::mutex> lg(_delta_column_group_cache_lock);
         auto itr = _delta_column_group_cache.find(tsid);
         if (itr != _delta_column_group_cache.end()) {
             search_delta_column_groups_by_version(itr->second, version, dcgs);
+            StarRocksMetrics::instance()->delta_column_group_get_hit_cache.increment(1);
             return Status::OK();
         }
     }
@@ -232,6 +234,31 @@ void UpdateManager::clear_cached_delta_column_group(const std::vector<TabletSegm
             _delta_column_group_cache.erase(itr);
         }
     }
+}
+
+Status UpdateManager::set_cached_delta_column_group(KVStore* meta, const TabletSegmentId& tsid,
+                                                    const DeltaColumnGroupPtr& dcg) {
+    {
+        std::lock_guard<std::mutex> lg(_delta_column_group_cache_lock);
+        auto itr = _delta_column_group_cache.find(tsid);
+        if (itr != _delta_column_group_cache.end()) {
+            itr->second.insert(itr->second.begin(), dcg);
+            _delta_column_group_cache_mem_tracker->consume(dcg->memory_usage());
+            return Status::OK();
+        }
+    }
+    // find from rocksdb
+    DeltaColumnGroupList new_dcgs;
+    RETURN_IF_ERROR(
+            TabletMetaManager::get_delta_column_group(meta, tsid.tablet_id, tsid.segment_id, INT64_MAX, &new_dcgs));
+    std::lock_guard<std::mutex> lg(_delta_column_group_cache_lock);
+    auto itr = _delta_column_group_cache.find(tsid);
+    if (itr != _delta_column_group_cache.end()) {
+        _delta_column_group_cache_mem_tracker->release(delta_column_group_list_memory_usage(itr->second));
+    }
+    _delta_column_group_cache[tsid] = new_dcgs;
+    _delta_column_group_cache_mem_tracker->consume(delta_column_group_list_memory_usage(new_dcgs));
+    return Status::OK();
 }
 
 void UpdateManager::expire_cache() {
@@ -384,7 +411,7 @@ Status UpdateManager::on_rowset_finished(Tablet* tablet, Rowset* rowset) {
     if (rowset->is_column_mode_partial_update()) {
         auto state_entry = _update_column_state_cache.get_or_create(
                 strings::Substitute("$0_$1", tablet->tablet_id(), rowset_unique_id));
-        st = state_entry->value().load(tablet, rowset);
+        st = state_entry->value().load(tablet, rowset, _update_mem_tracker);
         state_entry->update_expire_time(MonotonicMillis() + _cache_expire_ms);
         _update_column_state_cache.update_object_size(state_entry, state_entry->value().memory_usage());
         if (st.ok()) {

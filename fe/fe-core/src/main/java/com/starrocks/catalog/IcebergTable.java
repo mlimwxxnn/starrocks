@@ -38,12 +38,15 @@ import com.starrocks.thrift.TTableDescriptor;
 import com.starrocks.thrift.TTableType;
 import org.apache.iceberg.BaseTable;
 import org.apache.iceberg.PartitionField;
+import org.apache.iceberg.SortField;
+import org.apache.iceberg.types.Types;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
 import java.io.DataInput;
 import java.io.DataOutput;
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -68,6 +71,7 @@ public class IcebergTable extends Table {
     private Optional<IcebergMetricsReporter> metricsReporter = Optional.empty();
 
     private Map<String, String> icebergProperties = Maps.newHashMap();
+    private List<Column> partitionColumns;
 
     public IcebergTable() {
         super(TableType.ICEBERG);
@@ -112,17 +116,45 @@ public class IcebergTable extends Table {
     @Override
     public String getUUID() {
         if (CatalogMgr.isExternalCatalog(catalogName)) {
-            return String.join(".", catalogName, remoteDbName, remoteTableName, Long.toString(createTime));
+            return String.join(".", catalogName, remoteDbName, remoteTableName,
+                    ((BaseTable) getNativeTable()).operations().current().uuid());
         } else {
             return Long.toString(id);
         }
     }
 
     public List<Column> getPartitionColumns() {
-        List<PartitionField> identityPartitionFields = this.getNativeTable().spec().fields().stream().
-                filter(partitionField -> partitionField.transform().isIdentity()).collect(Collectors.toList());
-        return identityPartitionFields.stream().map(partitionField -> getColumn(partitionField.name())).collect(
-                Collectors.toList());
+        if (partitionColumns == null) {
+            List<PartitionField> identityPartitionFields = this.getNativeTable().spec().fields().stream().
+                    filter(partitionField -> partitionField.transform().isIdentity()).collect(Collectors.toList());
+            partitionColumns = identityPartitionFields.stream().map(partitionField -> getColumn(partitionField.name()))
+                    .collect(Collectors.toList());
+        }
+
+        return partitionColumns;
+    }
+
+    public List<Integer> partitionColumnIndexes() {
+        List<Column> partitionCols = getPartitionColumns();
+        return partitionCols.stream().map(col -> fullSchema.indexOf(col)).collect(Collectors.toList());
+    }
+
+    public List<Integer> getSortKeyIndexes() {
+        List<Integer> indexes = new ArrayList<>();
+        org.apache.iceberg.Table nativeTable = getNativeTable();
+        List<Types.NestedField> fields = nativeTable.schema().asStruct().fields();
+        List<Integer> sortFieldSourceIds = nativeTable.sortOrder().fields().stream()
+                .map(SortField::sourceId)
+                .collect(Collectors.toList());
+
+        for (int i = 0; i < fields.size(); i++) {
+            Types.NestedField field = fields.get(i);
+            if (sortFieldSourceIds.contains(field.fieldId())) {
+                indexes.add(i);
+            }
+        }
+
+        return indexes;
     }
 
     public boolean isUnPartitioned() {
@@ -224,6 +256,11 @@ public class IcebergTable extends Table {
 
     @Override
     public boolean isSupported() {
+        return true;
+    }
+
+    @Override
+    public boolean supportInsert() {
         return true;
     }
 

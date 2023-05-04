@@ -585,6 +585,7 @@ build_arrow() {
     -DCMAKE_INSTALL_PREFIX=$TP_INSTALL_DIR \
     -DCMAKE_INSTALL_LIBDIR=lib64 \
     -DARROW_BOOST_USE_SHARED=OFF -DARROW_GFLAGS_USE_SHARED=OFF -DBoost_NO_BOOST_CMAKE=ON -DBOOST_ROOT=$TP_INSTALL_DIR \
+    -DJEMALLOC_HOME=$TP_INSTALL_DIR \
     -Dzstd_SOURCE=BUNDLED \
     -Dgflags_ROOT=$TP_INSTALL_DIR/ \
     -DSnappy_ROOT=$TP_INSTALL_DIR/ \
@@ -596,7 +597,6 @@ build_arrow() {
     ${BUILD_SYSTEM} -j$PARALLEL
     ${BUILD_SYSTEM} install
     #copy dep libs
-    cp -rf ./jemalloc_ep-prefix/src/jemalloc_ep/dist/lib/libjemalloc_pic.a $TP_INSTALL_DIR/lib64/libjemalloc.a
     cp -rf ./brotli_ep/src/brotli_ep-install/lib/libbrotlienc-static.a $TP_INSTALL_DIR/lib64/libbrotlienc.a
     cp -rf ./brotli_ep/src/brotli_ep-install/lib/libbrotlidec-static.a $TP_INSTALL_DIR/lib64/libbrotlidec.a
     cp -rf ./brotli_ep/src/brotli_ep-install/lib/libbrotlicommon-static.a $TP_INSTALL_DIR/lib64/libbrotlicommon.a
@@ -955,10 +955,18 @@ build_jemalloc() {
     unset CFLAGS
     export CFLAGS="-O3 -fno-omit-frame-pointer -fPIC -g"
     cd $TP_SOURCE_DIR/$JEMALLOC_SOURCE
-    ./configure --prefix=${TP_INSTALL_DIR} --with-jemalloc-prefix=je --enable-prof --disable-cxx --disable-libdl --disable-shared
+    # jemalloc supports a runtime page size that's smaller or equal to the build
+    # time one, but aborts on a larger one. If not defined, it falls back to the
+    # the build system's _SC_PAGESIZE, which in many architectures can vary. Set
+    # this to 64K (2^16) for arm architecture, and default 4K on x86 for performance.
+    local addition_opts=" --with-lg-page=12"
+    if [[ $MACHINE_TYPE == "aarch64" ]] ; then
+        # change to 64K for arm architecture
+        addition_opts=" --with-lg-page=16"
+    fi
+    ./configure --prefix=${TP_INSTALL_DIR} --with-jemalloc-prefix=je --enable-prof --disable-cxx --disable-libdl --disable-shared $addition_opts
     make -j$PARALLEL
     make install
-    mv $TP_INSTALL_DIR/lib/libjemalloc.a $TP_INSTALL_DIR/lib/libjemalloc_for_starrocks.a
     export CFLAGS=$OLD_CFLAGS
 }
 
@@ -1086,6 +1094,8 @@ build_brpc
 build_rocksdb
 build_librdkafka
 build_flatbuffers
+# must build before arrow
+build_jemalloc
 build_arrow
 build_pulsar
 build_s2
@@ -1105,7 +1115,6 @@ build_broker_thirdparty_jars
 build_aws_cpp_sdk
 build_vpack
 build_opentelemetry
-build_jemalloc
 build_benchmark
 build_fast_float
 build_cachelib

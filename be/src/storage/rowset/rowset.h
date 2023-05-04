@@ -207,6 +207,7 @@ public:
     bool empty() const { return rowset_meta()->empty(); }
     size_t num_rows() const { return rowset_meta()->num_rows(); }
     size_t total_row_size() const { return rowset_meta()->total_row_size(); }
+    size_t total_update_row_size() const { return rowset_meta()->total_update_row_size(); }
     Version version() const { return rowset_meta()->version(); }
     RowsetId rowset_id() const { return rowset_meta()->rowset_id(); }
     std::string rowset_id_str() const { return rowset_meta()->rowset_id().to_string(); }
@@ -222,6 +223,8 @@ public:
     // remove all files in this rowset
     // TODO should we rename the method to remove_files() to be more specific?
     Status remove();
+
+    Status remove_delta_column_group();
 
     // close to clear the resource owned by rowset
     // including: open files, indexes and so on
@@ -365,7 +368,7 @@ private:
 
     Status _remove_delta_column_group_files(std::shared_ptr<FileSystem> fs);
 
-    Status _link_delta_column_group_files(const std::string& dir, RowsetId new_rowset_id);
+    Status _link_delta_column_group_files(const std::string& dir);
 
     std::vector<SegmentSharedPtr> _segments;
 };

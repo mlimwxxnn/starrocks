@@ -77,6 +77,33 @@ public class TrinoQueryTest extends TrinoTestBase {
     }
 
     @Test
+    public void testDateExpression() throws Exception {
+        String sql = "select current_date";
+        analyzeSuccess(sql);
+
+        sql = "select current_time";
+        analyzeSuccess(sql);
+
+        sql = "select current_timestamp";
+        analyzeSuccess(sql);
+
+        sql = "select localtimestamp";
+        analyzeSuccess(sql);
+
+        sql = "select localtime";
+        analyzeSuccess(sql);
+
+        sql = "select timestamp '2021-01-01 00:00:00'";
+        assertPlanContains(sql, "'2021-01-01 00:00:00'");
+
+        sql = "select timestamp '2021-01-01 10:01:02.123456'";
+        assertPlanContains(sql, "'2021-01-01 10:01:02.123456'");
+
+        sql = "select date '2021-01-01'";
+        assertPlanContains(sql, "'2021-01-01'");
+    }
+
+    @Test
     public void testCastExpression() throws Exception {
         String sql = "select cast(tb as varchar(10)) from tall";
         assertPlanContains(sql, "<slot 11> : CAST(2: tb AS VARCHAR(10))");
@@ -98,6 +125,57 @@ public class TrinoQueryTest extends TrinoTestBase {
 
         sql = "select cast(ti as timestamp) from tall";
         assertPlanContains(sql, "<slot 11> : CAST(9: ti AS DATETIME)");
+    }
+
+    @Test
+    public void testNullifExpression() throws Exception {
+        String sql = "select nullif(1, 2)";
+        assertPlanContains(sql, "<slot 2> : nullif(1, 2)");
+
+        sql = "select nullif(v1, v2) from t0";
+        assertPlanContains(sql, "<slot 4> : nullif(1: v1, 2: v2)");
+    }
+
+    @Test
+    public void testIfExpression() throws Exception {
+        String sql = "select if(1, 2, 3)";
+        assertPlanContains(sql, "<slot 2> : 2");
+
+        sql = "select if(v1, v2, v3) from t0";
+        assertPlanContains(sql, "<slot 4> : if(CAST(1: v1 AS BOOLEAN), 2: v2, 3: v3)");
+
+        sql = "select if(v1, v2) from t0";
+        assertPlanContains(sql, "<slot 4> : if(CAST(1: v1 AS BOOLEAN), 2: v2, NULL)");
+
+        sql = "select * from t0 where if (v1, v2, v3) = 2";
+        assertPlanContains(sql, "PREDICATES: if(CAST(1: v1 AS BOOLEAN), 2: v2, 3: v3) = 2");
+    }
+
+    @Test
+    public void testDecimal() throws Exception {
+        String sql = "select cast(tj as decimal32) from tall";
+        analyzeFail(sql, "Unknown type: decimal32");
+
+        sql = "select cast(tj as decimal64) from tall";
+        analyzeFail(sql, "Unknown type: decimal64");
+
+        sql = "select cast(tj as decimal128) from tall";
+        analyzeFail(sql, "Unknown type: decimal128");
+
+        sql = "select cast(tj as decimal) from tall";
+        assertPlanContains(sql, "<slot 11> : CAST(10: tj AS DECIMAL128(38,0))");
+
+        sql = "select cast(tj as decimal(10, 2)) from tall";
+        assertPlanContains(sql, "<slot 11> : CAST(10: tj AS DECIMAL64(10,2))");
+
+        sql = "select cast(tj as decimal(10)) from tall";
+        assertPlanContains(sql, "<slot 11> : CAST(10: tj AS DECIMAL64(10,0))");
+
+        sql = "select cast(tj as decimal(28, 2)) from tall";
+        assertPlanContains(sql, "<slot 11> : CAST(10: tj AS DECIMAL128(28,2))");
+
+        sql = "select cast(tj as decimal(28)) from tall";
+        assertPlanContains(sql, "<slot 11> : CAST(10: tj AS DECIMAL128(28,0))");
     }
 
     @Test
@@ -216,7 +294,6 @@ public class TrinoQueryTest extends TrinoTestBase {
         sql = "select array[v1,v2] from t0";
         assertPlanContains(sql, "[1: v1,2: v2]");
 
-
         sql = "select array[NULL][1] + 1, array[1,2,3][1] + array[array[1,2,3],array[1,1,1]][2][2];";
         assertPlanContains(sql, "1:Project\n" +
                 "  |  <slot 2> : NULL\n" +
@@ -297,7 +374,6 @@ public class TrinoQueryTest extends TrinoTestBase {
                 "  |  <slot 5> : 3: c2.b");
     }
 
-    @Test
     public void testSelectRow() throws Exception {
         String sql = "select row(1,2)";
         assertPlanContains(sql, " <slot 2> : row(1, 2)");
@@ -608,7 +684,6 @@ public class TrinoQueryTest extends TrinoTestBase {
         assertPlanContains(sql, "<slot 1> : 1: v1", "output: count(if(CAST(1: v1 AS BOOLEAN), 1, NULL))");
     }
 
-
     @Test
     public void testLimit() throws Exception {
         String sql = "select * from t0 limit 10";
@@ -732,5 +807,82 @@ public class TrinoQueryTest extends TrinoTestBase {
                         "  |  column statistics: \n" +
                         "  |  * v1-->[-Infinity, Infinity, 0.0, 1.0, 1.0] UNKNOWN\n" +
                         "  |  * v2-->[-Infinity, Infinity, 0.0, 1.0, 1.0] UNKNOWN"));
+    }
+
+    @Test
+    public void testIntervalLiteral() throws Exception {
+        String sql = "select date '2022-01-01' + interval '1' year;";
+        assertPlanContains(sql, "<slot 2> : '2023-01-01 00:00:00'");
+
+        sql = "select date '2022-01-01' + interval '1' year + interval '1' month;";
+        assertPlanContains(sql, "<slot 2> : '2023-02-01 00:00:00'");
+
+        sql = "select date '2022-01-01' + interval '1' year + interval '1' month + interval '1' day;";
+        assertPlanContains(sql, "<slot 2> : '2023-02-02 00:00:00'");
+
+        sql = "select date '2022-01-01' + interval '1' year + interval '1' month + interval '1' day + interval '1' hour;";
+        assertPlanContains(sql, "<slot 2> : '2023-02-02 01:00:00'");
+
+        sql = "select date '2022-01-01' + interval '1' year + interval '1' month + interval '1' day + interval '1' hour + " +
+                "interval '1' minute;";
+        assertPlanContains(sql, "<slot 2> : '2023-02-02 01:01:00'");
+
+        sql = "select date '2022-01-01' + interval '1' year + interval '1' month + interval '1' day + interval '1' hour + " +
+                "interval '1' minute + interval '1' second;";
+        assertPlanContains(sql, "<slot 2> : '2023-02-02 01:01:01'");
+
+        sql = "select interval '1' year + date '2022-01-01';";
+        assertPlanContains(sql, "<slot 2> : '2023-01-01 00:00:00'");
+    }
+
+    @Test
+    public void selectDoubleLiteral() throws Exception {
+        String sql = "select 1.0";
+        assertPlanContains(sql, "<slot 2> : 1.0");
+
+        sql = "select  -1.79E+309;";
+        analyzeFail(sql);
+
+        sql = "select  -1.79E+3;";
+        assertPlanContains(sql, "<slot 2> : -1790.0");
+
+        sql = "select  -1.79E+10;";
+        assertPlanContains(sql, "<slot 2> : -17900000000");
+
+        sql = "select approx_percentile(2.25, -1.79E+309)";
+        analyzeFail(sql);
+
+        sql = "select approx_percentile(2.25, 1.79E-10)";
+        assertPlanContains(sql, "percentile_approx(2.25, 1.79E-10)");
+
+        sql = "select approx_percentile(2.25, 0.4)";
+        assertPlanContains(sql, "percentile_approx(2.25, 0.4)");
+    }
+
+    @Test
+    public void testTrim() throws Exception {
+        String sql = "select trim(' abc ');";
+        assertPlanContains(sql, "<slot 2> : trim(' abc ')");
+
+        sql = "select trim('!' from '!foo!');";
+        assertPlanContains(sql, "<slot 2> : trim('!foo!', '!')");
+
+        sql = "select trim(leading from '  abcd');";
+        assertPlanContains(sql, "<slot 2> : ltrim('  abcd')");
+
+        sql = "select trim(leading 'a' from '  abcd');";
+        assertPlanContains(sql, "<slot 2> : ltrim('  abcd', 'a')");
+
+        sql = "select trim(both '$' FROM '$var$');";
+        assertPlanContains(sql, "<slot 2> : trim('$var$', '$')");
+
+        sql = "select trim(both from '  abcd');";
+        assertPlanContains(sql, "<slot 2> : trim('  abcd')");
+
+        sql = "select trim(trailing 'ER' from upper('worker'));";
+        assertPlanContains(sql, "<slot 2> : rtrim(upper('worker'), 'ER')");
+
+        sql = "select trim(trailing from '  abcd');";
+        assertPlanContains(sql, "<slot 2> : rtrim('  abcd')");
     }
 }

@@ -46,7 +46,7 @@ import org.apache.logging.log4j.Logger;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
-import java.util.HashSet;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.PriorityQueue;
@@ -181,9 +181,8 @@ public class DiskAndTabletLoadReBalancer extends Rebalancer {
             // check used percent after clone
             double srcUsedPercent = (double) (srcTotalUsedCapacity - replicaSize) / srcTotalCapacity;
             double destUsedPercent = (double) (destTotalUsedCapacity + replicaSize) / destTotalCapacity;
-            if ((destUsedPercent > (Config.storage_flood_stage_usage_percent / 100.0)) ||
-                    ((destTotalCapacity - destTotalUsedCapacity - replicaSize) <
-                            Config.storage_flood_stage_left_capacity_bytes)) {
+            if (DiskInfo.exceedLimit(destTotalCapacity - destTotalUsedCapacity - replicaSize,
+                    destTotalCapacity, false)) {
                 throw new SchedException(SchedException.Status.UNRECOVERABLE, "dest be disk used exceed limit");
             }
             if (srcUsedPercent < destUsedPercent) {
@@ -219,8 +218,8 @@ public class DiskAndTabletLoadReBalancer extends Rebalancer {
                     }
 
                     double usedPercent = (double) totalUsedCapacity / totalCapacity;
-                    if ((usedPercent > (Config.storage_flood_stage_usage_percent / 100.0)) ||
-                            ((totalCapacity - totalUsedCapacity) < Config.storage_flood_stage_left_capacity_bytes)) {
+                    if (DiskInfo.exceedLimit(totalCapacity - totalUsedCapacity,
+                            totalCapacity, false)) {
                         throw new SchedException(SchedException.Status.UNRECOVERABLE, "be disk used exceed limit");
                     }
 
@@ -248,8 +247,8 @@ public class DiskAndTabletLoadReBalancer extends Rebalancer {
                     }
 
                     double usedPercent = (double) totalUsedCapacity / totalCapacity;
-                    if ((usedPercent > (Config.storage_flood_stage_usage_percent / 100.0)) ||
-                            ((totalCapacity - totalUsedCapacity) < Config.storage_flood_stage_left_capacity_bytes)) {
+                    if (DiskInfo.exceedLimit(totalCapacity - totalUsedCapacity,
+                            totalCapacity, false)) {
                         throw new SchedException(SchedException.Status.UNRECOVERABLE, "be disk used exceed limit");
                     }
 
@@ -501,9 +500,9 @@ public class DiskAndTabletLoadReBalancer extends Rebalancer {
             for (int round = 1; round <= 2; round++) {
                 PARTITION:
                 for (Pair<Long, Long> partitionMVId : hState.sortedPartitions) {
-                    Set<Long> hPartitionTablets = hState.partitionTablets.get(partitionMVId);
-                    Set<Long> lPartitionTablets = lState.partitionTablets.computeIfAbsent(partitionMVId,
-                            pmId -> new HashSet<>());
+                    List<Long> hPartitionTablets = hState.partitionTablets.get(partitionMVId);
+                    List<Long> lPartitionTablets = lState.partitionTablets.computeIfAbsent(partitionMVId,
+                            pmId -> new LinkedList<>());
                     int replicaTotalCnt = partitionReplicaCnt.getOrDefault(partitionMVId.first, 0);
                     int slotOfHighBE = hPartitionTablets.size() - (replicaTotalCnt / beStats.size());
                     int slotOfLowBE = ((replicaTotalCnt + beStats.size() - 1) / beStats.size())
@@ -943,6 +942,19 @@ public class DiskAndTabletLoadReBalancer extends Rebalancer {
         return partitionTablets;
     }
 
+    private Map<Pair<Long, Long>, Double> getPartitionAvgReplicaSize(long beId,
+                                                                     Map<Pair<Long, Long>, Set<Long>> partitionTablets) {
+        Map<Pair<Long, Long>, Double> result = new HashMap<>();
+        for (Map.Entry<Pair<Long, Long>, Set<Long>> entry : partitionTablets.entrySet()) {
+            long totalSize = 0;
+            for (Long tabletId : entry.getValue()) {
+                totalSize += invertedIndex.getReplica(tabletId, beId).getDataSize();
+            }
+            result.put(entry.getKey(), (double) totalSize / (entry.getValue().size() > 0 ? entry.getValue().size() : 1));
+        }
+        return result;
+    }
+
     private int getPartitionTabletNumOnBePath(long dbId, long tableId, long partitionId, long indexId, long beId,
                                               long pathHash) {
         GlobalStateMgr globalStateMgr = GlobalStateMgr.getCurrentState();
@@ -1173,7 +1185,7 @@ public class DiskAndTabletLoadReBalancer extends Rebalancer {
                         // NOTICE: state has been changed, the tablet must be selected
                         // set dest beId and pathHash
                         if (!isLocalBalance) {
-                            //round robin to select dest be path
+                            // round-robin to select dest be path
                             Pair<List<Long>, Integer> destPaths = beDisks.get(destTablets.first);
                             Long pathHash = destPaths.first.get(destPaths.second);
                             destPaths.second = (destPaths.second + 1) % destPaths.first.size();
@@ -1629,24 +1641,45 @@ public class DiskAndTabletLoadReBalancer extends Rebalancer {
                                                        int backendCnt,
                                                        boolean sortPartition) {
         Map<Pair<Long, Long>, Set<Long>> partitionTablets = getPartitionTablets(backendId, medium, -1L);
+        Map<Pair<Long, Long>, List<Long>> partitionTabletList = new HashMap<>();
+        for (Map.Entry<Pair<Long, Long>, Set<Long>> entry : partitionTablets.entrySet()) {
+            partitionTabletList.put(entry.getKey(), new LinkedList<>(entry.getValue()));
+        }
+        Map<Pair<Long, Long>, Double> partitionAvgReplicaSize = getPartitionAvgReplicaSize(backendId, partitionTablets);
         List<Pair<Long, Long>> partitions = new ArrayList<>(partitionTablets.keySet());
         if (sortPartition) {
             partitions.sort((p1, p2) -> {
                 // skew is (tablet cnt on current BE - average tablet cnt on every BE)
-                // sort partitions by skew in desc order
+                // sort partitions by skew in desc order, if skew is same, sort by avgReplicaSize in desc order.
                 int skew1 = partitionTablets.get(p1).size()
                         - partitionReplicaCnt.getOrDefault(p1.first, 0) / backendCnt;
                 int skew2 = partitionTablets.get(p2).size()
                         - partitionReplicaCnt.getOrDefault(p2.first, 0) / backendCnt;
-                return skew2 - skew1;
+                if (skew2 != skew1) {
+                    return skew2 - skew1;
+                } else {
+                    return Double.compare(partitionAvgReplicaSize.get(p2), partitionAvgReplicaSize.get(p1));
+                }
             });
+
+            for (List<Long> tabletList : partitionTabletList.values()) {
+                if (tabletList.size() <= 1) {
+                    continue;
+                }
+                tabletList.sort((t1, t2) -> {
+                    Replica replica1 = invertedIndex.getReplica(t1, backendId);
+                    Replica replica2 = invertedIndex.getReplica(t2, backendId);
+                    return Long.compare(replica2 == null ? 0L : replica2.getDataSize(),
+                            replica1 == null ? 0L : replica1.getDataSize());
+                });
+            }
         }
 
         BackendBalanceState backendBalanceState = new BackendBalanceState(backendId,
                 backendLoadStatistic,
                 invertedIndex,
                 medium,
-                partitionTablets,
+                partitionTabletList,
                 partitions);
         backendBalanceState.init();
         return backendBalanceState;
@@ -1715,8 +1748,8 @@ public class DiskAndTabletLoadReBalancer extends Rebalancer {
             double destUsedPercent = (double) (destCap.second + size) / destCap.first;
 
             // first check dest be|path capacity limit
-            if ((destUsedPercent > (Config.storage_flood_stage_usage_percent / 100.0)) ||
-                    ((destCap.first - destCap.second - size) < Config.storage_flood_stage_left_capacity_bytes)) {
+            if (DiskInfo.exceedLimit(destCap.first - destCap.second - size,
+                    destCap.first, false)) {
                 return false;
             }
 
@@ -1771,7 +1804,8 @@ public class DiskAndTabletLoadReBalancer extends Rebalancer {
         List<Pair<Long, Long>> sortedPartitions;
         TabletInvertedIndex tabletInvertedIndex;
         // <partitionId, mvId> => tablets in that partition
-        Map<Pair<Long, Long>, Set<Long>> partitionTablets;
+        // tablets is sorted by data size in desc order for the BE in high load group
+        Map<Pair<Long, Long>, List<Long>> partitionTablets;
         // total data used capacity
         long usedCapacity;
         // pathHash => usedCapacity
@@ -1788,7 +1822,7 @@ public class DiskAndTabletLoadReBalancer extends Rebalancer {
                             BackendLoadStatistic statistic,
                             TabletInvertedIndex tabletInvertedIndex,
                             TStorageMedium medium,
-                            Map<Pair<Long, Long>, Set<Long>> partitionTablets,
+                            Map<Pair<Long, Long>, List<Long>> partitionTablets,
                             List<Pair<Long, Long>> partitions) {
             this.backendId = backendId;
             this.statistic = statistic;
@@ -1842,7 +1876,7 @@ public class DiskAndTabletLoadReBalancer extends Rebalancer {
         }
 
         // used for high load group
-        public List<Long> getTabletsInHighLoadPath(Set<Long> tablets) {
+        public List<Long> getTabletsInHighLoadPath(List<Long> tablets) {
             double avgUsedPercent = pathUsedCapacity.values().stream().mapToLong(Long::longValue).sum()
                     / (double) statistic.getTotalCapacityB(medium);
             // find the last high load index, we only choose tablet in the high load paths

@@ -54,6 +54,11 @@ struct SpillProcessMetrics {
     RuntimeProfile::Counter* restore_rows = nullptr;
     RuntimeProfile::Counter* shuffle_timer = nullptr;
     RuntimeProfile::Counter* split_partition_timer = nullptr;
+
+    RuntimeProfile::Counter* flush_bytes = nullptr;
+    RuntimeProfile::Counter* restore_bytes = nullptr;
+    RuntimeProfile::Counter* serialize_timer = nullptr;
+    RuntimeProfile::Counter* deserialize_timer = nullptr;
 };
 
 // major spill interfaces
@@ -123,7 +128,12 @@ public:
 
     bool restore_finished() const { return _reader->restore_finished(); }
 
-    void cancel() { _writer->cancel(); }
+    bool is_cancel() const { return _is_cancel; }
+
+    void cancel() {
+        _is_cancel = true;
+        _writer->cancel();
+    }
 
     void set_finished() { cancel(); }
 
@@ -144,6 +154,7 @@ public:
 
     const std::shared_ptr<spill::Serde>& serde() { return _serde; }
     BlockManager* block_manager() { return _block_manager; }
+    const ChunkBuilder& chunk_builder() { return _chunk_builder; }
 
 private:
     Status _get_spilled_task_status() {
@@ -175,5 +186,7 @@ private:
     std::shared_ptr<spill::Serde> _serde;
     spill::BlockManager* _block_manager = nullptr;
     std::shared_ptr<spill::BlockGroup> _block_group;
+
+    std::atomic_bool _is_cancel = false;
 };
 } // namespace starrocks::spill

@@ -95,8 +95,7 @@ public class CreateTableTest {
                         "char(20), `k4`  varchar(20), `k5`  boolean, `k6`  tinyint, `k7`  smallint, " +
                         "`k8`  int, `k9`  bigint, `k10` largeint, `k11` float, `k12` double, " +
                         "`k13` decimal(27,9)) DUPLICATE KEY(`k1`, `k2`, `k3`, `k4`, `k5`) PARTITION BY " +
-                        "time_slice(k2, interval 1 hour) DISTRIBUTED BY HASH(`k1`, `k2`, `k3`) " +
-                        "PROPERTIES ( \"storage_format\" = \"v2\");"
+                        "time_slice(k2, interval 1 hour) DISTRIBUTED BY HASH(`k1`, `k2`, `k3`); "
         );
     }
 
@@ -333,6 +332,50 @@ public class CreateTableTest {
                 () -> createTable("create table test.atbl14 (k1 int, k2 int, k3 float) duplicate key(k1)\n"
                         + "partition by range(k1) (partition p1 values less than(\"10\") ('wrong_key' = 'value'))\n"
                         + "distributed by hash(k2) buckets 1 properties('replication_num' = '1'); "));
+
+        ExceptionChecker.expectThrowsWithMsg(AnalysisException.class, "Illege expression type for Materialized Column "
+                                + "Column Type: INT, Expression Type: DOUBLE",
+                        () -> createTable("CREATE TABLE test.atbl15 ( id BIGINT NOT NULL,  array_data ARRAY<int> NOT NULL, \n"
+                                          + "mc INT AS (array_avg(array_data)) ) Primary KEY (id) \n"
+                                          + "DISTRIBUTED BY HASH(id) BUCKETS 7 PROPERTIES('replication_num' = '1');\n"));
+
+        ExceptionChecker.expectThrowsWithMsg(AnalysisException.class, "Materialized Column must be nullable column.",
+                        () -> createTable("CREATE TABLE test.atbl16 ( id BIGINT NOT NULL,  array_data ARRAY<int> NOT NULL, \n"
+                                          + "mc DOUBLE NOT NULL AS (array_avg(array_data)) ) \n"
+                                          + "Primary KEY (id) DISTRIBUTED BY HASH(id) BUCKETS 7 PROPERTIES"
+                                          + " ('replication_num' = '1');\n"));
+
+        ExceptionChecker.expectThrowsWithMsg(AnalysisException.class, "Input 'AS' is not "
+                                + "valid at this position.",
+                        () -> createTable("CREATE TABLE test.atbl17 ( id BIGINT NOT NULL,  array_data ARRAY<int> NOT NULL, \n"
+                                        + "mc DOUBLE AUTO_INCREMENT AS (array_avg(array_data)) ) \n"
+                                        + "Primary KEY (id) DISTRIBUTED BY HASH(id) BUCKETS 7 PROPERTIES"
+                                        + "('replication_num' = '1');\n"));
+
+        ExceptionChecker.expectThrowsWithMsg(AnalysisException.class, "Input 'AS' is not "
+                                + "valid at this position.",
+                        () -> createTable("CREATE TABLE test.atbl18 ( id BIGINT NOT NULL,  array_data ARRAY<int> NOT NULL, \n"
+                                          + "mc DOUBLE DEFAULT '1.0' AS (array_avg(array_data)) ) \n"
+                                          + "Primary KEY (id) DISTRIBUTED BY HASH(id) BUCKETS 7 PROPERTIES"
+                                          + "('replication_num' = '1');\n"));
+
+        ExceptionChecker.expectThrowsWithMsg(AnalysisException.class, "Expression can not refers to AUTO_INCREMENT columns",
+                        () -> createTable("CREATE TABLE test.atbl19 ( id BIGINT NOT NULL,  incr BIGINT AUTO_INCREMENT, \n"
+                                          + "array_data ARRAY<int> NOT NULL, mc BIGINT AS (incr) )\n"
+                                          + "Primary KEY (id) DISTRIBUTED BY HASH(id) BUCKETS 7 PROPERTIES"
+                                          + "('replication_num' = '1');\n"));
+
+        ExceptionChecker.expectThrowsWithMsg(AnalysisException.class, "Expression can not refers to other materialized columns",
+                        () -> createTable("CREATE TABLE test.atbl20 ( id BIGINT NOT NULL,  array_data ARRAY<int> NOT NULL, \n"
+                                          + "mc DOUBLE AS (array_avg(array_data)), \n"
+                                          + "mc_1 DOUBLE AS (mc) ) Primary KEY (id) \n"
+                                          + "DISTRIBUTED BY HASH(id) BUCKETS 7 PROPERTIES('replication_num' = '1');\n"));
+        
+        ExceptionChecker.expectThrowsWithMsg(AnalysisException.class, "Materialized Column don't support aggregation function",
+                        () -> createTable("CREATE TABLE test.atbl21 ( id BIGINT NOT NULL,  array_data ARRAY<int> NOT NULL, \n"
+                                          + "mc BIGINT AS (sum(id)) ) \n"
+                                          + "Primary KEY (id) DISTRIBUTED BY HASH(id) BUCKETS 7 PROPERTIES \n"
+                                          + "('replication_num' = '1');\n"));
     }
 
     @Test
@@ -541,8 +584,7 @@ public class CreateTableTest {
                 "DISTRIBUTED BY HASH(`k1`) BUCKETS 2\n" +
                 "PROPERTIES (\n" +
                 "    \"replication_num\" = \"1\",\n" +
-                "    \"in_memory\" = \"false\",\n" +
-                "    \"storage_format\" = \"DEFAULT\"\n" +
+                "    \"in_memory\" = \"false\"\n" +
                 ");";
         starRocksAssert.withTable(sql);
         final Table table = starRocksAssert.getCtx().getGlobalStateMgr().getDb(connectContext.getDatabase())
@@ -562,8 +604,7 @@ public class CreateTableTest {
                 "DISTRIBUTED BY HASH(`k1`) BUCKETS 2\n" +
                 "PROPERTIES (\n" +
                 "    \"replication_num\" = \"1\",\n" +
-                "    \"in_memory\" = \"false\",\n" +
-                "    \"storage_format\" = \"DEFAULT\"\n" +
+                "    \"in_memory\" = \"false\"\n" +
                 ");";
         starRocksAssert.withTable(sql);
         final Table table = starRocksAssert.getCtx().getGlobalStateMgr().getDb(connectContext.getDatabase())
@@ -579,8 +620,7 @@ public class CreateTableTest {
                 "DISTRIBUTED BY HASH(`k1`) BUCKETS 2\n" +
                 "PROPERTIES (\n" +
                 "    \"replication_num\" = \"1\",\n" +
-                "    \"in_memory\" = \"false\",\n" +
-                "    \"storage_format\" = \"DEFAULT\"\n" +
+                "    \"in_memory\" = \"false\"\n" +
                 ");";
         starRocksAssert.withTable(sql2);
 
@@ -602,8 +642,7 @@ public class CreateTableTest {
                         "DISTRIBUTED BY HASH(`k1`) BUCKETS 2\n" +
                         "PROPERTIES (\n" +
                         "    \"replication_num\" = \"1\",\n" +
-                        "    \"in_memory\" = \"false\",\n" +
-                        "    \"storage_format\" = \"DEFAULT\"\n" +
+                        "    \"in_memory\" = \"false\"\n" +
                         ");"));
         ExceptionChecker.expectThrowsWithMsg(AnalysisException.class,
                 "Default function uuid() for type INT is not supported",
@@ -616,8 +655,7 @@ public class CreateTableTest {
                         "DISTRIBUTED BY HASH(`k1`) BUCKETS 2\n" +
                         "PROPERTIES (\n" +
                         "    \"replication_num\" = \"1\",\n" +
-                        "    \"in_memory\" = \"false\",\n" +
-                        "    \"storage_format\" = \"DEFAULT\"\n" +
+                        "    \"in_memory\" = \"false\"\n" +
                         ");"));
 
         ExceptionChecker.expectThrowsWithMsg(AnalysisException.class,
@@ -631,8 +669,7 @@ public class CreateTableTest {
                         "DISTRIBUTED BY HASH(`k1`) BUCKETS 2\n" +
                         "PROPERTIES (\n" +
                         "    \"replication_num\" = \"1\",\n" +
-                        "    \"in_memory\" = \"false\",\n" +
-                        "    \"storage_format\" = \"DEFAULT\"\n" +
+                        "    \"in_memory\" = \"false\"\n" +
                         ");"));
     }
 

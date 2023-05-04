@@ -125,7 +125,9 @@ public abstract class LoadJob extends AbstractTxnStateChangeCallback implements 
     protected boolean strictMode = false; // default is false
     protected String timezone = TimeUtils.DEFAULT_TIME_ZONE;
     protected boolean partialUpdate = false;
+    protected String partialUpdateMode = "row";
     protected int priority = LoadPriority.NORMAL_VALUE;
+    protected long logRejectedRecordNum = 0;
     // reuse deleteFlag as partialUpdate
     // @Deprecated
     // protected boolean deleteFlag = false;
@@ -255,6 +257,10 @@ public abstract class LoadJob extends AbstractTxnStateChangeCallback implements 
         loadingStatus.setLoadFileInfo(fileNum, fileSize);
     }
 
+    public void updateScanRangeNum(long scanRangeNum) {
+        loadingStatus.updateScanRangeNum(scanRangeNum);
+    }
+
     public TUniqueId getRequestId() {
         return requestId;
     }
@@ -317,6 +323,9 @@ public abstract class LoadJob extends AbstractTxnStateChangeCallback implements 
             if (properties.containsKey(LoadStmt.PARTIAL_UPDATE)) {
                 partialUpdate = Boolean.valueOf(properties.get(LoadStmt.PARTIAL_UPDATE));
             }
+            if (properties.containsKey(LoadStmt.PARTIAL_UPDATE_MODE)) {
+                partialUpdateMode = properties.get(LoadStmt.PARTIAL_UPDATE_MODE);
+            }
 
             if (properties.containsKey(LoadStmt.LOAD_MEM_LIMIT)) {
                 try {
@@ -339,6 +348,10 @@ public abstract class LoadJob extends AbstractTxnStateChangeCallback implements 
 
             if (properties.containsKey(LoadStmt.PRIORITY)) {
                 priority = LoadPriority.priorityByName(properties.get(LoadStmt.PRIORITY));
+            }
+
+            if (properties.containsKey(LoadStmt.LOG_REJECTED_RECORD_NUM)) {
+                logRejectedRecordNum = Long.parseLong(properties.get(LoadStmt.LOG_REJECTED_RECORD_NUM));
             }
         }
     }
@@ -877,6 +890,9 @@ public abstract class LoadJob extends AbstractTxnStateChangeCallback implements 
             if (!loadingStatus.getTrackingUrl().equals(EtlStatus.DEFAULT_TRACKING_URL)) {
                 info.setUrl(loadingStatus.getTrackingUrl());
                 info.setTracking_sql("select tracking_log from information_schema.load_tracking_logs where job_id=" + id);
+            }
+            if (!loadingStatus.getRejectedRecordPaths().isEmpty()) {
+                info.setRejected_record_path(Joiner.on(", ").join(loadingStatus.getRejectedRecordPaths()));
             }
             info.setJob_details(loadingStatus.getLoadStatistic().toShowInfoStr());
             info.setNum_filtered_rows(loadingStatus.getLoadStatistic().totalFilteredRows());

@@ -214,6 +214,9 @@ StatusOr<ChunkUniquePtr> UnorderedInputStream::get_next(SerdeContext& ctx) {
             // move to the next block
             continue;
         }
+        if (res.status().ok() && res.value()->is_empty()) {
+            continue;
+        }
         if (!res.status().is_end_of_file()) {
             return res;
         }
@@ -253,6 +256,7 @@ private:
 
 Status OrderedInputStream::init(SerdePtr serde, const SortExecExprs* sort_exprs, const SortDescs* descs) {
     std::vector<starrocks::ChunkProvider> chunk_providers;
+    DCHECK(!_input_blocks.empty());
     for (auto& block : _input_blocks) {
         std::vector<BlockPtr> blocks{block};
         auto stream = std::make_shared<BufferedInputStream>(chunk_buffer_max_size,

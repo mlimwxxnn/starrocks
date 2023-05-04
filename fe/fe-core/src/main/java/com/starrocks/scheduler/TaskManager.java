@@ -15,6 +15,7 @@
 
 package com.starrocks.scheduler;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Lists;
@@ -27,6 +28,7 @@ import com.starrocks.common.io.Text;
 import com.starrocks.common.util.QueryableReentrantLock;
 import com.starrocks.common.util.TimeUtils;
 import com.starrocks.common.util.Util;
+import com.starrocks.meta.LimitExceededException;
 import com.starrocks.persist.gson.GsonUtils;
 import com.starrocks.qe.ConnectContext;
 import com.starrocks.qe.ShowResultSet;
@@ -133,23 +135,32 @@ public class TaskManager {
             if (taskSchedule == null) {
                 continue;
             }
-
+            long period = TimeUtils.convertTimeUnitValueToSecond(taskSchedule.getPeriod(),
+                    taskSchedule.getTimeUnit());
             LocalDateTime startTime = Utils.getDatetimeFromLong(taskSchedule.getStartTime());
-            Duration duration = Duration.between(LocalDateTime.now(), startTime);
-            long initialDelay = duration.getSeconds();
-            // if startTime < now, start scheduling now
-            if (initialDelay < 0) {
-                initialDelay = 0;
-            }
+            LocalDateTime scheduleTime = LocalDateTime.now();
+            long initialDelay = getInitialDelayTime(period, startTime, scheduleTime);
             // Tasks that run automatically have the lowest priority,
             // but are automatically merged if they are found to be merge-able.
             ExecuteOption option = new ExecuteOption(Constants.TaskRunPriority.LOWEST.value(),
                     true, task.getProperties());
             ScheduledFuture<?> future = periodScheduler.scheduleAtFixedRate(() ->
                             executeTask(task.getName(), option), initialDelay,
-                    TimeUtils.convertTimeUnitValueToSecond(taskSchedule.getPeriod(),
-                            taskSchedule.getTimeUnit()), TimeUnit.SECONDS);
+                    period, TimeUnit.SECONDS);
             periodFutureMap.put(task.getId(), future);
+        }
+    }
+
+    @VisibleForTesting
+    static long getInitialDelayTime(long period, LocalDateTime startTime,
+                                    LocalDateTime scheduleTime) {
+        Duration duration = Duration.between(scheduleTime, startTime);
+        long initialDelay = duration.getSeconds();
+        // if startTime < now, start scheduling from the next period
+        if (initialDelay < 0) {
+            return ((initialDelay % period) + period) % period;
+        } else {
+            return initialDelay;
         }
     }
 
@@ -354,8 +365,13 @@ public class TaskManager {
         if (dbName == null) {
             taskList.addAll(nameToTaskMap.values());
         } else {
-            taskList.addAll(nameToTaskMap.values().stream()
-                    .filter(u -> u.getDbName().equals(dbName)).collect(Collectors.toList()));
+            for (Map.Entry<String, Task> entry : nameToTaskMap.entrySet()) {
+                Task task = entry.getValue();
+
+                if (task.getDbName() != null && task.getDbName().equals(dbName)) {
+                    taskList.add(task);
+                }
+            }
         }
         return taskList;
     }
@@ -465,7 +481,21 @@ public class TaskManager {
         checksum ^= data.tasks.size();
         data.runStatus = showTaskRunStatus(null);
         String s = GsonUtils.GSON.toJson(data);
-        Text.writeString(dos, s);
+        boolean retry = false;
+        try {
+            Text.writeString(dos, s);
+        } catch (LimitExceededException ex) {
+            retry = true;
+        }
+        if (retry) {
+            int beforeLength = s.length();
+            taskRunManager.getTaskRunHistory().forceGC();
+            data.runStatus = showTaskRunStatus(null);
+            s = GsonUtils.GSON.toJson(data);
+            LOG.warn("Too much task metadata triggers forced task_run GC, " +
+                    "length before GC:{}, length after GC:{}.", beforeLength, s.length());
+            Text.writeString(dos, s);
+        }
         return checksum;
     }
 
