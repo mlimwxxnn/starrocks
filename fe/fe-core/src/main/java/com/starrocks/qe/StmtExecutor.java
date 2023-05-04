@@ -925,11 +925,12 @@ public class StmtExecutor {
                     // Sync load cache, auto-populate column statistic cache after Analyze table manually
                     false);
         } else {
+            StatsConstants.AnalyzeType analyzeType = analyzeStmt.isSample() ? StatsConstants.AnalyzeType.SAMPLE :
+                    StatsConstants.AnalyzeType.FULL;
             statisticExecutor.collectStatistics(statsConnectCtx,
                     StatisticsCollectJobFactory.buildStatisticsCollectJob(db, table, null,
                             analyzeStmt.getColumnNames(),
-                            analyzeStmt.isSample() ? StatsConstants.AnalyzeType.SAMPLE :
-                                    StatsConstants.AnalyzeType.FULL,
+                            analyzeType,
                             StatsConstants.ScheduleType.ONCE, analyzeStmt.getProperties()),
                     analyzeStatus,
                     // Sync load cache, auto-populate column statistic cache after Analyze table manually
@@ -1448,7 +1449,16 @@ public class StmtExecutor {
                     ErrorReport.reportDdlException(ErrorCode.ERR_QUERY_EXCEPTION);
                 } else {
                     coord.cancel();
-                    ErrorReport.reportDdlException(ErrorCode.ERR_QUERY_TIMEOUT);
+                    if (coord.isThriftServerHighLoad()) {
+                        ErrorReport.reportDdlException(ErrorCode.ERR_QUERY_TIMEOUT,
+                                "Please check the thrift-server-pool metrics, " +
+                                        "if the pool size reaches thrift_server_max_worker_threads(default is 4096), " +
+                                        "you can set the config to a higher value in fe.conf, " +
+                                        "or set parallel_fragment_exec_instance_num to a lower value in session variable");
+                    } else {
+                        ErrorReport.reportDdlException(ErrorCode.ERR_QUERY_TIMEOUT,
+                                "Increase the query_timeout session variable and retry");
+                    }
                 }
             }
 
@@ -1560,7 +1570,16 @@ public class StmtExecutor {
             }
         } catch (Throwable t) {
             // if any throwable being thrown during insert operation, first we should abort this txn
-            LOG.warn("handle insert stmt fail: {}", label, t);
+            String failedSql = "";
+            if (originStmt != null && originStmt.originStmt != null) {
+                failedSql = originStmt.originStmt;
+            }
+            LOG.warn("failed to handle stmt [{}] label: {}", failedSql, label, t);
+            String errMsg = t.getMessage();
+            if (errMsg == null) {
+                errMsg = "A problem occurred while executing the [ " + failedSql + "] statement with label:" + label;
+            }
+
             try {
                 if (targetTable instanceof ExternalOlapTable) {
                     ExternalOlapTable externalTable = (ExternalOlapTable) targetTable;
@@ -1568,11 +1587,11 @@ public class StmtExecutor {
                             externalTable.getSourceTableDbId(), transactionId,
                             externalTable.getSourceTableHost(),
                             externalTable.getSourceTablePort(),
-                            t.getMessage() == null ? "Unknown reason" : t.getMessage());
+                            errMsg);
                 } else {
                     GlobalStateMgr.getCurrentGlobalTransactionMgr().abortTransaction(
                             database.getId(), transactionId,
-                            t.getMessage() == null ? "Unknown reason" : t.getMessage(),
+                            errMsg,
                             coord == null ? Lists.newArrayList() : TabletFailInfo.fromThrift(coord.getFailInfos()));
                 }
             } catch (Exception abortTxnException) {
@@ -1582,7 +1601,7 @@ public class StmtExecutor {
             }
 
             // if not using old load usage pattern, error will be returned directly to user
-            StringBuilder sb = new StringBuilder(t.getMessage() == null ? "Unknown reason" : t.getMessage());
+            StringBuilder sb = new StringBuilder(errMsg);
             if (coord != null && !Strings.isNullOrEmpty(coord.getTrackingUrl())) {
                 sb.append(". tracking sql: ").append(trackingSql);
             }

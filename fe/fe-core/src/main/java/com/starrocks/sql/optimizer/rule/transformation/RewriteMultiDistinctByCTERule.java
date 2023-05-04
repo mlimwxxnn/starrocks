@@ -133,17 +133,18 @@ public class RewriteMultiDistinctByCTERule extends TransformationRule {
     public boolean check(OptExpression input, OptimizerContext context) {
         // check cte is disabled or hasNoGroup false
         LogicalAggregationOperator agg = (LogicalAggregationOperator) input.getOp();
+        List<CallOperator> distinctAggOperatorList = agg.getAggregations().values().stream()
+                .filter(CallOperator::isDistinct).collect(Collectors.toList());
+        boolean hasMultiColumns = distinctAggOperatorList.stream().anyMatch(f -> f.getChildren().size() > 1);
+        if (hasMultiColumns && distinctAggOperatorList.size() > 1) {
+            return true;
+        }
+
         if (!context.getSessionVariable().isCboCteReuse()) {
             return false;
         }
 
-
-        List<CallOperator> distinctAggOperatorList = agg.getAggregations().values().stream()
-                .filter(CallOperator::isDistinct).collect(Collectors.toList());
-        boolean hasMultiColumns = distinctAggOperatorList.stream().anyMatch(f -> f.getChildren().size() > 1);
-
-        if (agg.hasSkew() && distinctAggOperatorList.size() > 1 && !hasMultiColumns &&
-                !agg.getGroupingKeys().isEmpty()) {
+        if (agg.hasSkew() && distinctAggOperatorList.size() > 1 && !agg.getGroupingKeys().isEmpty()) {
             return true;
         }
 
@@ -163,7 +164,7 @@ public class RewriteMultiDistinctByCTERule extends TransformationRule {
     public List<OptExpression> transform(OptExpression input, OptimizerContext context) {
         ColumnRefFactory columnRefFactory = context.getColumnRefFactory();
         // define cteId
-        int cteId = columnRefFactory.getNextRelationId();
+        int cteId = context.getCteContext().getNextCteId();
 
         // build logic cte produce operator
         OptExpression cteProduce = OptExpression.create(new LogicalCTEProduceOperator(cteId), input.getInputs());

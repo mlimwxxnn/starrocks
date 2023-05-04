@@ -18,7 +18,7 @@ SHOW VARIABLES LIKE '%time_zone%';
 
 ### Set variables
 
-Variables can generally be set to take effect **globally** or **only on the current session**. When set to global, a new value will be used in subsequent new sessions without affecting the current session. When set to “current session only”, the variable will only take effect on the current session.
+Variables can generally be set to take effect **globally** or **only on the current session**. When set to global, a new value will be used in subsequent new sessions without affecting the current session. When set to "current session only", the variable will only take effect on the current session.
 
 A variable set by `SET var_name=xxx;` only takes effect for the current session. For example:
 
@@ -131,8 +131,8 @@ SELECT /*+ SET_VAR
 
 * streaming_preaggregation_mode
 
-  Used to specify the preaggregation mode for the first phase of GROUP BY. If the preaggregation effect in the first phase is not satisfactory, you can use the streaming mode, which performs simple data serialization before streaming data to the destination。Valid values:
-  * `auto`：The system first tries local preaggregation. If the effect is not satisfactory, it switches to the streaming mode. This is the default value.
+  Used to specify the preaggregation mode for the first phase of GROUP BY. If the preaggregation effect in the first phase is not satisfactory, you can use the streaming mode, which performs simple data serialization before streaming data to the destination. Valid values:
+  * `auto`: The system first tries local preaggregation. If the effect is not satisfactory, it switches to the streaming mode. This is the default value.
   * `force_preaggregation`: The system directly performs local preaggregation.
   * `force_streaming`: The system directly performs streaming.
 
@@ -266,6 +266,8 @@ SELECT /*+ SET_VAR
 
   The parallelism of a pipeline instance, which is used to adjust the query concurrency. Default value: 0, indicating the system automatically adjusts the parallelism of each pipeline instance. You can also set this parameter to a value greater than 0. Generally, set the value to half the number of physical CPU cores.
 
+  From v3.0 onwards, StarRocks adaptively adjusts this parameter based on query parallelism.
+
 * enable_sort_aggregate (2.5 and later)
 
   Specifies whether to enable sorted streaming. `true` indicates sorted streaming is enabled to sort data in data streams.
@@ -320,7 +322,7 @@ SELECT /*+ SET_VAR
 
   In a distributed query execution plan, the upper-level node usually has one or more exchange nodes to receive data from the execution instances of the lower-level node on different BEs. Usually the number of exchange nodes is equal to the number of execution instances of the lower-level node.
 
-  In some aggregation query scenarios where the amount of data decreases drastically after aggregation, you can try to modify this variable to a smaller value to reduce the resource overhead. An example would be running aggregation queries using theDUPLICATE model.
+  In some aggregation query scenarios where the amount of data decreases drastically after aggregation, you can try to modify this variable to a smaller value to reduce the resource overhead. An example would be running aggregation queries using the Duplicate Key table.
 
 * parallel_fragment_exec_instance_num
 

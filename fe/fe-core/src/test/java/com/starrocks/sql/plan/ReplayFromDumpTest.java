@@ -22,7 +22,9 @@ import com.starrocks.persist.gson.GsonUtils;
 import com.starrocks.qe.ConnectContext;
 import com.starrocks.qe.SessionVariable;
 import com.starrocks.qe.VariableMgr;
+import com.starrocks.sql.optimizer.OptExpression;
 import com.starrocks.sql.optimizer.OptimizerContext;
+import com.starrocks.sql.optimizer.base.CTEProperty;
 import com.starrocks.sql.optimizer.dump.QueryDumpInfo;
 import com.starrocks.sql.optimizer.rule.RuleSet;
 import com.starrocks.sql.optimizer.rule.transformation.JoinAssociativityRule;
@@ -59,6 +61,7 @@ public class ReplayFromDumpTest {
         UtFrameUtils.createMinStarRocksCluster();
         // Should disable Dynamic Partition in replay dump test
         Config.dynamic_partition_enable = false;
+        Config.tablet_sched_disable_colocate_overall_balance = true;
         // create connect context
         connectContext = UtFrameUtils.createDefaultCtx();
         connectContext.getSessionVariable().setOptimizerExecuteTimeout(30000);
@@ -66,6 +69,7 @@ public class ReplayFromDumpTest {
         connectContext.getSessionVariable().setCboPushDownAggregateMode(-1);
         starRocksAssert = new StarRocksAssert(connectContext);
         FeConstants.runningUnitTest = true;
+        FeConstants.showLocalShuffleColumnsInExplain = false;
     }
 
     @Before
@@ -77,6 +81,7 @@ public class ReplayFromDumpTest {
     @AfterClass
     public static void afterClass() throws Exception {
         connectContext.getSessionVariable().setEnableLocalShuffleAgg(true);
+        FeConstants.showLocalShuffleColumnsInExplain = true;
     }
 
     public String getModelContent(String filename, String model) {
@@ -798,7 +803,7 @@ public class ReplayFromDumpTest {
         Pair<QueryDumpInfo, String> replayPair =
                 getPlanFragment(getDumpInfoFromFile("query_dump/hive_tpch02_catalog"), null,
                         TExplainLevel.NORMAL);
-        Assert.assertTrue(replayPair.second, replayPair.second.contains("19:HASH JOIN\n" +
+        Assert.assertTrue(replayPair.second, replayPair.second.contains("5:HASH JOIN\n" +
                 "  |  join op: INNER JOIN (PARTITIONED)\n" +
                 "  |  colocate: false, reason: \n" +
                 "  |  equal join conjunct: 17: ps_partkey = 1: p_partkey"));
@@ -832,5 +837,30 @@ public class ReplayFromDumpTest {
                 "  |  colocate: false, reason: \n" +
                 "  |  equal join conjunct: 52: n_regionkey = 58: r_regionkey"));
         FeConstants.isReplayFromQueryDump = false;
+    }
+
+    @Test
+    public void testTPCH11() throws Exception {
+        try {
+            FeConstants.USE_MOCK_DICT_MANAGER = true;
+            Pair<QueryDumpInfo, String> replayPair =
+                    getCostPlanFragment(getDumpInfoFromFile("query_dump/tpch_query11_mv_rewrite"));
+            Assert.assertTrue(replayPair.second, replayPair.second.contains(
+                    "n_name,[<place-holder> = 'GERMANY'])\n" +
+                            "     dict_col=n_name"));
+        } finally {
+            FeConstants.USE_MOCK_DICT_MANAGER = false;
+        }
+    }
+
+    @Test
+    public void testPruneCTEProperty() throws Exception {
+        String jsonStr = getDumpInfoFromFile("query_dump/cte_reuse");
+        connectContext.getSessionVariable().disableJoinReorder();
+        Pair<String, ExecPlan> result = UtFrameUtils.getNewPlanAndFragmentFromDump(connectContext,
+                getDumpInfoFromJson(jsonStr));
+        OptExpression expression = result.second.getPhysicalPlan().inputAt(1);
+        Assert.assertEquals(new CTEProperty(1), expression.getLogicalProperty().getUsedCTEs());
+        Assert.assertEquals(4, result.second.getCteProduceFragments().size());
     }
 }

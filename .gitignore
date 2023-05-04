@@ -22,6 +22,7 @@ core.*
 extension/spark-doris-connector/.classpath
 extension/spark-doris-connector/target
 fe/log
+**/ut_ports
 custom_env.sh
 ut_dir
 log/
@@ -59,6 +60,7 @@ StarRocksLex.tokens
 .project
 .settings/
 .idea/
+.gradle/
 /Default/
 be/cmake-build*
 be/.vscode
@@ -66,6 +68,7 @@ be/src/gen_cpp/*.cc
 be/src/gen_cpp/*.cpp
 be/src/gen_cpp/*.h
 be/src/gen_cpp/opcode
+be/src/thirdparty/starcache/
 be/ut_build_ASAN/
 be/tags
 

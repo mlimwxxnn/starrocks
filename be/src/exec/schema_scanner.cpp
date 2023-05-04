@@ -15,6 +15,8 @@
 #include "exec/schema_scanner.h"
 
 #include "column/type_traits.h"
+#include "exec/schema_scanner/schema_be_bvars_scanner.h"
+#include "exec/schema_scanner/schema_be_cloud_native_compactions_scanner.h"
 #include "exec/schema_scanner/schema_be_compactions_scanner.h"
 #include "exec/schema_scanner/schema_be_configs_scanner.h"
 #include "exec/schema_scanner/schema_be_logs_scanner.h"
@@ -144,6 +146,10 @@ std::unique_ptr<SchemaScanner> SchemaScanner::create(TSchemaTableType::type type
         return std::make_unique<SchemaFeTabletSchedulesScanner>();
     case TSchemaTableType::SCH_BE_COMPACTIONS:
         return std::make_unique<SchemaBeCompactionsScanner>();
+    case TSchemaTableType::SCH_BE_BVARS:
+        return std::make_unique<SchemaBeBvarsScanner>();
+    case TSchemaTableType::SCH_BE_CLOUD_NATIVE_COMPACTIONS:
+        return std::make_unique<SchemaBeCloudNativeCompactionsScanner>();
     default:
         return std::make_unique<SchemaDummyScanner>();
     }

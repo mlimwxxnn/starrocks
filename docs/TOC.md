@@ -10,12 +10,17 @@
 + Quick Start
   + Deploy
     + [Deploy StarRocks in Linux](./quick_start/Deploy.md)
-    + [Deploy StarRocks in Docker](./quick_start/deploy_in_docker.md)
+    + [Deploy StarRocks with Docker](./quick_start/deploy_with_docker.md)
   + [Create a table](./quick_start/Create_table.md)
   + [Load and query data](./quick_start/Import_and_query.md)
 + Table Design
   + [Understand StarRocks table design](./table_design/StarRocks_table_design.md)
-  + [Data models](./table_design/Data_model.md)
+  + Table types
+    + [Overview of table types](./table_design/table_types/table_types.md)
+    + [Duplicate Key table](./table_design/table_types/duplicate_key_table.md)
+    + [Aggragete table](./table_design/table_types/aggregate_table.md)
+    + [Unique Key table](./table_design/table_types/unique_key_table.md)
+    + [Primary Key table](./table_design/table_types/primary_key_table.md)
   + Data distribution
     + [Data distribution](./table_design/Data_distribution.md)
     + [Automatic partitioning](./table_design/automatic_partitioning.md)
@@ -50,7 +55,7 @@
     + [Delta Lake catalog](./data_source/catalog/deltalake_catalog.md)
     + [JDBC catalog](./data_source/catalog/jdbc_catalog.md)
     + [Query external data](./data_source/catalog/query_external_data.md)
-  + [External tables](./data_source/External_table.md)
+  + [External table](./data_source/External_table.md)
   + [File external table](./data_source/file_external_table.md)
   + [Local Cache](./data_source/Block_cache.md)
 + Query Acceleration
@@ -66,15 +71,27 @@
   + Computing the Number of Distinct Values
     + [Use Bitmap for exact count distinct](./using_starrocks/Using_bitmap.md)
     + [Use HLL for approximate count distinct](./using_starrocks/Using_HLL.md)
+  + [Sorted streaming aggregate](./using_starrocks/sorted_aggregate.md)
 + Integration
-  + [Integrate with StarRocks](./integrations/intro.md)
   + [Authenticate to AWS resources](./integrations/authenticate_to_aws_resources.md)
+  + [Authenticate to Microsoft Azure Storage](./integrations/authenticate_to_azure_storage.md)
+  + [Authenticate to Google Cloud Storage](./integrations/authenticate_to_gcs.md)
+  + BI tools
+    + [Hex](./integrations/BI_integrations/Hex.md)
+    + [Querybook](./integrations/BI_integrations/Querybook.md)
+    + [Apache Superset](./integrations/BI_integrations/Superset.md)
+    + [Tableau Desktop](./integrations/BI_integrations/Tableau_Desktop.md)
+  + IDE tools
+    + [DataGrip](./integrations/IDE_integrations/DataGrip.md)
+    + [DBeaver](./integrations/IDE_integrations/DBeaver.md)
+  + [Other tools and systems](./integrations/other_integrations/intro.md)
 + Administration
   + Deployment
     + [Deploy a shared-data StarRocks cluster](./administration/deploy_shared_data.md)
     + [Deploy StarRocks with StarGo](./administration/stargo.md)
-    + [Deploy StarRocks in Docker](./quick_start/deploy_in_docker.md)
-    + [Deploy and manage CN on Kubernetes with StarRocks Operator](./administration/sr_operator.md)
+    + Deploy StarRocks on Kubernetes
+      + [Deploy StarRocks with Operator](./administration/sr_operator.md)
+      + [Deploy StarRocks with Helm](./administration/helm.md)
     + [Deploy CN](./administration/deploy_cn.md)
     + [Deploy FE cluster with high availability](./administration/Deployment.md)
   + Management
@@ -175,8 +192,8 @@
       + [CANCEL BACKUP](./sql-reference/sql-statements/data-definition/CANCEL%20BACKUP.md)
       + [CANCEL RESTORE](./sql-reference/sql-statements/data-definition/CANCEL%20RESTORE.md)
       + [CREATE ANALYZE](./sql-reference/sql-statements/data-definition/CREATE%20ANALYZE.md)
-      + [CREATE EXTERNAL CATALOG](./sql-reference/sql-statements/data-definition/CREATE%20EXTERNAL%20CATALOG.md)
       + [CREATE DATABASE](./sql-reference/sql-statements/data-definition/CREATE%20DATABASE.md)
+      + [CREATE EXTERNAL CATALOG](./sql-reference/sql-statements/data-definition/CREATE%20EXTERNAL%20CATALOG.md)
       + [CREATE INDEX](./sql-reference/sql-statements/data-definition/CREATE%20INDEX.md)
       + [CREATE MATERIALIZED VIEW](./sql-reference/sql-statements/data-definition/CREATE%20MATERIALIZED%20VIEW.md)
       + [CREATE REPOSITORY](./sql-reference/sql-statements/data-definition/CREATE%20REPOSITORY.md)
@@ -298,6 +315,7 @@
       + [grouping_id](./sql-reference/sql-functions/aggregate-functions/grouping_id.md)
       + [hll_empty](./sql-reference/sql-functions/aggregate-functions/hll_empty.md)
       + [hll_hash](./sql-reference/sql-functions/aggregate-functions/hll_hash.md)
+      + [hll_raw_agg](./sql-reference/sql-functions/aggregate-functions/hll_raw_agg.md)
       + [hll_union](./sql-reference/sql-functions/aggregate-functions/hll_union.md)
       + [hll_union_agg](./sql-reference/sql-functions/aggregate-functions/hll_union_agg.md)
       + [max](./sql-reference/sql-functions/aggregate-functions/max.md)
@@ -452,6 +470,7 @@
       + [unix_timestamp](./sql-reference/sql-functions/date-time-functions/unix_timestamp.md)
       + [utc_timestamp](./sql-reference/sql-functions/date-time-functions/utc_timestamp.md)
       + [week](./sql-reference/sql-functions/date-time-functions/week.md)
+      + [week_iso](./sql-reference/sql-functions/date-time-functions/week_iso.md)
       + [weekofyear](./sql-reference/sql-functions/date-time-functions/weekofyear.md)
       + [weeks_add](./sql-reference/sql-functions/date-time-functions/weeks_add.md)
       + [weeks_diff](./sql-reference/sql-functions/date-time-functions/weeks_diff.md)

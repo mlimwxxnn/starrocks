@@ -1345,6 +1345,15 @@ public class AggregateTest extends PlanTestBase {
     }
 
     @Test
+    public void testMultiCountDistinctWithNoneGroup1() throws Exception {
+        String sql = "with tmp1 as (select 'a' as a from dual), tmp2 as (select 'b' as b from dual) " +
+                "select count(distinct t1b), count(distinct t1c), count(distinct t1.a), count(distinct t2.b) " +
+                "from test_all_type join tmp1 t1 join tmp2 t2 join tmp1 t3 join tmp2 t4";
+        Pair<String, ExecPlan> pair = UtFrameUtils.getPlanAndFragment(connectContext, sql);
+        assertContains(pair.first, "CTEAnchor(cteid=3)");
+    }
+
+    @Test
     public void testMultiCountDistinctWithNoneGroup2() throws Exception {
         String sql = "select count(distinct t1b), count(distinct t1c), sum(t1c), max(t1b) from test_all_type";
         String plan = getFragmentPlan(sql);
@@ -2257,5 +2266,20 @@ public class AggregateTest extends PlanTestBase {
                 "  2:AGGREGATE (update finalize)\n" +
                 "  |  output: sum(4: expr)");
         connectContext.getSessionVariable().setNewPlanerAggStage(oldValue);
+    }
+
+    @Test
+    public void testDistinctConst() throws Exception {
+        FeConstants.runningUnitTest = true;
+        String sql = "SELECT DISTINCT 16 col0 FROM t0 AS cor0 LEFT JOIN t1 AS cor1 ON NULL IS NULL";
+        String plan = getFragmentPlan(sql);
+        assertContains(plan, "6:Project\n" +
+                "  |  <slot 7> : 16\n" +
+                "  |  limit: 1");
+        sql = "SELECT DISTINCT 61 AS col0 FROM t0 AS cor0 LEFT JOIN t1 AS cor1 ON NOT NULL IS NOT NULL, t0 AS cor2;";
+        plan = getFragmentPlan(sql);
+        assertContains(plan, "11:Project\n" +
+                "  |  <slot 10> : 61\n" +
+                "  |  limit: 1");
     }
 }

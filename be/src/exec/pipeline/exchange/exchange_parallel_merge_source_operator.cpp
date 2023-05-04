@@ -34,7 +34,7 @@ bool ExchangeParallelMergeSourceOperator::has_output() const {
     if (_is_finished) {
         return false;
     }
-    if (_merger->is_current_stage_finished(_driver_sequence)) {
+    if (_merger->is_current_stage_finished(_driver_sequence, false)) {
         return false;
     }
     if (_merger->is_pending(_driver_sequence)) {
@@ -44,11 +44,7 @@ bool ExchangeParallelMergeSourceOperator::has_output() const {
 }
 
 bool ExchangeParallelMergeSourceOperator::is_finished() const {
-    if (_limit < 0) {
-        return _is_finished;
-    } else {
-        return _num_rows_returned >= _limit || _is_finished;
-    }
+    return _is_finished;
 }
 
 Status ExchangeParallelMergeSourceOperator::set_finishing(RuntimeState* state) {
@@ -59,8 +55,7 @@ Status ExchangeParallelMergeSourceOperator::set_finishing(RuntimeState* state) {
 }
 
 StatusOr<ChunkPtr> ExchangeParallelMergeSourceOperator::pull_chunk(RuntimeState* state) {
-    // TODO process limit
-    auto chunk = _merger->try_get_next(_driver_sequence);
+    ChunkPtr chunk = _merger->try_get_next(_driver_sequence);
 
     if (_merger->is_finished()) {
         _is_finished = true;
@@ -79,9 +74,7 @@ Status ExchangeParallelMergeSourceOperatorFactory::prepare(RuntimeState* state) 
 
 OperatorPtr ExchangeParallelMergeSourceOperatorFactory::create(int32_t degree_of_parallelism, int32_t driver_sequence) {
     ++_stream_recvr_cnt;
-    return std::make_shared<ExchangeParallelMergeSourceOperator>(this, _id, _plan_node_id, driver_sequence, _num_sender,
-                                                                 _row_desc, _sort_exec_exprs, _is_asc_order,
-                                                                 _nulls_first, _offset, _limit);
+    return std::make_shared<ExchangeParallelMergeSourceOperator>(this, _id, _plan_node_id, driver_sequence);
 }
 
 void ExchangeParallelMergeSourceOperatorFactory::close(RuntimeState* state) {
@@ -107,8 +100,8 @@ merge_path::MergePathCascadeMerger* ExchangeParallelMergeSourceOperatorFactory::
         auto chunk_providers = _stream_recvr->create_merge_path_chunk_providers();
         SortDescs sort_descs(_is_asc_order, _nulls_first);
         _merger = std::make_unique<merge_path::MergePathCascadeMerger>(
-                degree_of_parallelism(), _sort_exec_exprs->lhs_ordering_expr_ctxs(), sort_descs, chunk_providers,
-                state->chunk_size());
+                state->chunk_size(), degree_of_parallelism(), _sort_exec_exprs->lhs_ordering_expr_ctxs(), sort_descs,
+                _row_desc.tuple_descriptors()[0], TTopNType::ROW_NUMBER, _offset, _limit, chunk_providers);
     }
     return _merger.get();
 }

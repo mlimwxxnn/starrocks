@@ -95,7 +95,7 @@ ADMIN SET FRONTEND CONFIG ("key" = "value");
 | Parameter                               | Unit | Default                                         | Description                                                  |
 | --------------------------------------- | ---- | ----------------------------------------------- | ------------------------------------------------------------ |
 | load_straggler_wait_second              | s    | 300                                             | The maximum loading lag that can be tolerated by a BE replica. If this value is exceeded, cloning is performed to clone data from other replicas. Unit: seconds. |
-| desired_max_waiting_jobs                | -    | 100                                             | The maximum number of pending jobs in an FE. The number refers to all jobs, such as table creation, loading, and schema change jobs. If the number of pending jobs in an FE reaches this value, the FE will reject new load requests. This parameter takes effect only for asynchronous loading. |
+| desired_max_waiting_jobs                | -    | 1024                                            | The maximum number of pending jobs in an FE. The number refers to all jobs, such as table creation, loading, and schema change jobs. If the number of pending jobs in an FE reaches this value, the FE will reject new load requests. This parameter takes effect only for asynchronous loading. From v2.5 onwards, the default value is changed from 100 to 1024.|
 | max_load_timeout_second                 | s    | 259200                                          | The maximum timeout duration allowed for a load job. The load job fails if this limit is exceeded. This limit applies to all types of load jobs. Unit: seconds. |
 | min_load_timeout_second                 | s    | 1                                               | The minimum timeout duration allowed for a load job. This limit applies to all types of load jobs. Unit: seconds. |
 | max_running_txn_num_per_db              | -    | 100                                             | The maximum number of load jobs that can run in parallel for each database in a StarRocks cluster. The default value is 100. If this value is exceeded, incoming load jobs will not be executed. If the incoming load job is a synchronous load job, it will be rejected. If it is an asynchronous load job, it will be put into the waiting queue. We do not recommend you increase this value because this will increase system load. |
@@ -250,7 +250,7 @@ This section provides an overview of the static parameters that you can configur
 
 | Parameter                         | Default                                                      | Description                                                  |
 | --------------------------------- | ------------------------------------------------------------ | ------------------------------------------------------------ |
-| async_load_task_pool_size         | 10                                                           | The size of the load task thread pool. This parameter is valid only for Broker Load. |
+| async_load_task_pool_size         | 2                                                            | The size of the load task thread pool. This parameter is valid only for Broker Load. The value must be less than `max_running_txn_num_per_db`. From v2.5 onwards, the default value is changed from 10 to 2.
 | load_checker_interval_second      | 5                                                            | The time interval at which load jobs are processed on a rolling basis. Unit: second. |
 | transaction_clean_interval_second | 30                                                           | The time interval at which finished transactions are cleaned up. Unit: second. We recommend that you specify a short time interval to ensure that finished transactions can be cleaned up in a timely manner. |
 | label_clean_interval_second       | 14400                                                        | The time interval at which labels are cleaned up. Unit: second. We recommend that you specify a short time interval to ensure that historical labels can be cleaned up in a timely manner. |
@@ -345,7 +345,7 @@ BE dynamic parameters are as follows.
 | max_base_compaction_num_singleton_deltas | 100 | N/A | The maximum number of segments that can be compacted in each Base Compaction. |
 | base_compaction_interval_seconds_since_last_operation | 86400 | Second | The time interval since the last Base Compaction. This configuration item is one of the conditions that trigger a Base Compaction. |
 | cumulative_compaction_check_interval_seconds | 1 | Second | The time interval of thread polling for a Cumulative Compaction. |
-| update_compaction_check_interval_seconds | 60 | Second | The time interval at which to check the Update Compaction of the Primary Key data model. |
+| update_compaction_check_interval_seconds | 60 | Second | The time interval at which to check the Update Compaction of the Primary Key table. |
 | min_compaction_failure_interval_sec | 120 | Second | The minimum time interval that a Tablet Compaction can be scheduled since the last compaction failure. |
 | periodic_counter_update_period_ms | 500 | ms | The time interval at which to collect the Counter statistics. |
 | load_error_log_reserve_hours | 48 | Hour | The time for which data loading logs are reserved. |
@@ -396,7 +396,7 @@ BE static parameters are as follows.
 | drop_tablet_worker_count | 3 | N/A | The number of threads used to drop a tablet. |
 | push_worker_count_normal_priority | 3 | N/A | The number of threads used to handle a load task with NORMAL priority. |
 | push_worker_count_high_priority | 3 | N/A | The number of threads used to handle a load task with HIGH priority. |
-| transaction_publish_version_worker_count | 0 | N/A | The max number of threads used to publish a version. When it's value is less than or equal to 0, it will default to half of the number of cores.  |
+| transaction_publish_version_worker_count | 0 | N/A | The maximum number of threads used to publish a version. When this value is set to less than or equal to `0`, the system uses half of the CPU core count as the value, so as to avoid insufficient thread resources when import concurrency is high but only a fixed number of threads are used. From v2.5, the default value has been changed from `8` to `0`.  |
 | clear_transaction_task_worker_count | 1 | N/A | The number of threads used for clearing transaction. |
 | alter_tablet_worker_count | 3 | N/A | The number of threads used for schema change. |
 | clone_worker_count | 3 | N/A | The number of threads used for clone. |
@@ -423,7 +423,7 @@ BE static parameters are as follows.
 | file_descriptor_cache_capacity | 16384 | N/A | The number of file descriptors that can be cached. |
 | min_file_descriptor_number | 60000 | N/A | The minimum number of file descriptors in the BE process. |
 | index_stream_cache_capacity | 10737418240 | Byte | The cache capacity for the statistical information of BloomFilter, Min, and Max. |
-| disable_storage_page_cache | TRUE | N/A | The boolean value to control if to disable PageCache. When PageCache is enabled, StarRocks caches the query results. PageCache can significantly improve the query performance when similar queries are repeated frequently. `true` indicates to disable PageCache. |
+| disable_storage_page_cache | FALSE | N/A | The boolean value to control if to disable PageCache. When PageCache is enabled, StarRocks caches the query results. PageCache can significantly improve the query performance when similar queries are repeated frequently. `true` indicates to disable PageCache. The value of this item has been changed from `true` to `false` since StarRocks v2.4.|
 | base_compaction_num_threads_per_disk | 1 | N/A | The number of threads used for Base Compaction on each storage volume. |
 | base_cumulative_delta_ratio | 0.3 | N/A | The ratio of cumulative file size to base file size. The ratio reaching this value is one of the conditions that trigger the Base Compaction. |
 | max_compaction_concurrency | -1 | N/A | The maximum concurrency of compactions (both Base Compaction and Cumulative Compaction). The value -1 indicates that no limit is imposed on the concurrency. |

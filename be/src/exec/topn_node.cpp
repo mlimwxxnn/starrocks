@@ -296,7 +296,7 @@ std::vector<std::shared_ptr<pipeline::OperatorFactory>> TopNNode::_decompose_to_
 
     // spill process operator
     if (runtime_state()->enable_spill() && _limit < 0 && !is_partition_topn) {
-        context->interpolate_spill_process(spill_channel_factory, degree_of_parallelism);
+        context->interpolate_spill_process(id(), spill_channel_factory, degree_of_parallelism);
     }
 
     // create context factory
@@ -330,6 +330,11 @@ std::vector<std::shared_ptr<pipeline::OperatorFactory>> TopNNode::_decompose_to_
     SourceOperatorFactoryPtr source_operator;
 
     source_operator = std::make_shared<SourceFactory>(context->next_operator_id(), id(), context_factory);
+    if (!is_partition_topn && enable_parallel_merge) {
+        down_cast<LocalParallelMergeSortSourceOperatorFactory*>(source_operator.get())
+                ->set_tuple_desc(_materialized_tuple_desc);
+        down_cast<LocalParallelMergeSortSourceOperatorFactory*>(source_operator.get())->set_is_gathered(need_merge);
+    }
 
     ops_sink_with_sort.emplace_back(std::move(sink_operator));
     context->add_pipeline(ops_sink_with_sort);
@@ -376,18 +381,11 @@ pipeline::OpFactories TopNNode::decompose_to_pipeline(pipeline::PipelineBuilderC
                                                                                 enable_parallel_merge);
     } else {
         if (runtime_state()->enable_spill() && _limit < 0) {
-            if (need_merge) {
-                if (enable_parallel_merge) {
-                    operators_source_with_sort =
-                            _decompose_to_pipeline<SortContextFactory, SpillablePartitionSortSinkOperatorFactory,
-                                                   LocalParallelMergeSortSourceOperatorFactory>(
-                                    context, is_partition_topn, need_merge, enable_parallel_merge);
-                } else {
-                    operators_source_with_sort =
-                            _decompose_to_pipeline<SortContextFactory, SpillablePartitionSortSinkOperatorFactory,
-                                                   LocalMergeSortSourceOperatorFactory>(
-                                    context, is_partition_topn, need_merge, enable_parallel_merge);
-                }
+            if (enable_parallel_merge) {
+                operators_source_with_sort =
+                        _decompose_to_pipeline<SortContextFactory, SpillablePartitionSortSinkOperatorFactory,
+                                               LocalParallelMergeSortSourceOperatorFactory>(
+                                context, is_partition_topn, need_merge, enable_parallel_merge);
             } else {
                 operators_source_with_sort =
                         _decompose_to_pipeline<SortContextFactory, SpillablePartitionSortSinkOperatorFactory,
@@ -395,18 +393,11 @@ pipeline::OpFactories TopNNode::decompose_to_pipeline(pipeline::PipelineBuilderC
                                                                                     need_merge, enable_parallel_merge);
             }
         } else {
-            if (need_merge) {
-                if (enable_parallel_merge) {
-                    operators_source_with_sort =
-                            _decompose_to_pipeline<SortContextFactory, PartitionSortSinkOperatorFactory,
-                                                   LocalParallelMergeSortSourceOperatorFactory>(
-                                    context, is_partition_topn, need_merge, enable_parallel_merge);
-                } else {
-                    operators_source_with_sort =
-                            _decompose_to_pipeline<SortContextFactory, PartitionSortSinkOperatorFactory,
-                                                   LocalMergeSortSourceOperatorFactory>(
-                                    context, is_partition_topn, need_merge, enable_parallel_merge);
-                }
+            if (enable_parallel_merge) {
+                operators_source_with_sort =
+                        _decompose_to_pipeline<SortContextFactory, PartitionSortSinkOperatorFactory,
+                                               LocalParallelMergeSortSourceOperatorFactory>(
+                                context, is_partition_topn, need_merge, enable_parallel_merge);
             } else {
                 operators_source_with_sort =
                         _decompose_to_pipeline<SortContextFactory, PartitionSortSinkOperatorFactory,
