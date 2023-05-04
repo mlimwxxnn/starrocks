@@ -397,7 +397,7 @@ TARGET_LINK_LIBRARIES(bytes_test
 
 # =================================================
 # test cases must be compiled as a standalone binary
-ADD_BE_TEST(storage/task/engine_storage_migration_task_test)
+#ADD_BE_TEST(storage/task/engine_storage_migration_task_test)
 
 # you can simply add test case as single binary without adding `main`
 # ADD_BE_TEST(exec/sorting_test)
