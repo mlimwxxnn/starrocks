@@ -21,6 +21,9 @@
 #include "column/vectorized_fwd.h"
 #include "util/value_generator.h"
 
+
+#include "iostream"
+
 namespace starrocks {
 
 template <LogicalType LT>
@@ -38,6 +41,9 @@ public:
     template <bool is_add>
     void do_update(FunctionContext* ctx, const Column** columns, AggDataPtr __restrict state, size_t row_num) const {
         const auto& column = down_cast<const InputColumnType&>(*columns[0]);
+
+        std::cout << "before do_update: " << this->data(state).count << std::endl;
+
         if (column.get_data()[row_num]){
             if constexpr (is_add) {
                 ++this->data(state).count;
@@ -45,6 +51,9 @@ public:
                 --this->data(state).count;
             }
         }
+
+        std::cout << "after do_update: " << this->data(state).count << std::endl;
+
     }
 
     void update(FunctionContext* ctx, const Column** columns, AggDataPtr __restrict state,

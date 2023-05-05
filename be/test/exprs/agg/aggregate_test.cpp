@@ -28,6 +28,7 @@
 #include "exprs/agg/maxmin.h"
 #include "exprs/agg/nullable_aggregate.h"
 #include "exprs/agg/sum.h"
+#include "exprs/agg/count_if.h"
 #include "exprs/anyval_util.h"
 #include "exprs/arithmetic_operation.h"
 #include "exprs/function_context.h"
@@ -40,6 +41,8 @@
 #include "util/slice.h"
 #include "util/thrift_util.h"
 #include "util/unaligned_access.h"
+
+#include "iostream"
 
 namespace starrocks {
 
@@ -224,7 +227,7 @@ void test_agg_function(FunctionContext* ctx, const AggregateFunction* func, TRes
     // merge column 1 and column 2
     ColumnPtr serde_column = BinaryColumn::create();
     std::string func_name = func->get_name();
-    if (func_name == "count" || func_name == "sum" || func_name == "maxmin") {
+    if (func_name == "count" || func_name == "sum" || func_name == "maxmin" || func_name == "count_if") {
         serde_column = ResultColumn::create();
     }
 
@@ -313,6 +316,18 @@ TEST_F(AggregateTest, test_count) {
     test_agg_function<TimestampValue, int64_t>(ctx, func, 22, 22, 44);
     test_agg_function<DateValue, int64_t>(ctx, func, 22, 22, 44);
 }
+
+//TEST_F(AggregateTest, test_count_if) {
+//    const AggregateFunction* func = get_aggregate_function("count_if", TYPE_BOOLEAN, TYPE_BIGINT, false);
+//    test_agg_function<int16_t, int64_t>(ctx, func, 1025, 1000, 2025);
+//    test_agg_function<int32_t, int64_t>(ctx, func, 1025, 1000, 2025);
+//    test_agg_function<int64_t, int64_t>(ctx, func, 1025, 1000, 2025);
+//    test_agg_function<int128_t, int64_t>(ctx, func, 1025, 1000, 2025);
+//    test_agg_function<float, int64_t>(ctx, func, 1025, 1000, 2025);
+//    test_agg_function<double, int64_t>(ctx, func, 1025, 1000, 2025);
+//}
+
+
 
 TEST_F(AggregateTest, test_sum) {
     const AggregateFunction* func = get_aggregate_function("sum", TYPE_SMALLINT, TYPE_BIGINT, false);
@@ -1225,6 +1240,136 @@ TEST_F(AggregateTest, test_sum_nullable) {
     const Column& result_data_column = result_column->data_column_ref();
     const auto& result_data = static_cast<const Int64Column&>(result_data_column);
     ASSERT_EQ(4950, result_data.get_data()[0]);
+}
+
+TEST_F(AggregateTest, test_count_if_nullable_3) {
+    using NullableSumInt64 = NullableAggregateFunctionState<CountIfFunctionState<TYPE_INT>, false>;
+    const AggregateFunction* cf_null = get_aggregate_function("count_if", TYPE_INT, TYPE_BIGINT, true);
+    auto state = ManagedAggrState::create(ctx, cf_null);
+
+    auto data_column = Int32Column::create();
+    auto null_column = NullColumn::create();
+    for (int i = 0; i < 100; i++) {
+        data_column->append(1);
+        null_column->append(i % 2 ? 1 : 0);
+    }
+
+    auto column = NullableColumn::create(std::move(data_column), std::move(null_column));
+    const Column* row_column = column.get();
+
+    // test update
+    cf_null->update_batch_single_state(ctx, column->size(), &row_column, state->state());
+    auto* null_state = (NullableSumInt64*)state->state();
+    int64_t result = *reinterpret_cast<const int64_t*>(null_state->nested_state());
+    ASSERT_EQ(50, result);
+
+    // test serialize
+    auto serde_column2 = NullableColumn::create(Int64Column::create(), NullColumn::create());
+    cf_null->serialize_to_column(ctx, state->state(), serde_column2.get());
+
+    // test merge
+    auto state2 = ManagedAggrState::create(ctx, cf_null);
+
+    auto data_column2 = Int32Column::create();
+    auto null_column2 = NullColumn::create();
+    for (int i = 0; i < 100; i++) {
+        data_column2->append(1);
+        null_column2->append(i % 2 ? 0 : 1);
+    }
+    auto column2 = NullableColumn::create(std::move(data_column2), std::move(null_column2));
+    const Column* row_column2 = column2.get();
+
+    cf_null->update_batch_single_state(ctx, column2->size(), &row_column2, state2->state());
+
+    cf_null->merge(ctx, serde_column2.get(), state2->state(), 0);
+
+    auto result_column = NullableColumn::create(Int64Column::create(), NullColumn::create());
+    cf_null->finalize_to_column(ctx, state2->state(), result_column.get());
+
+    const Column& result_data_column = result_column->data_column_ref();
+    const auto& result_data = static_cast<const Int64Column&>(result_data_column);
+    ASSERT_EQ(100, result_data.get_data()[0]);
+}
+
+/*
+TEST_F(AggregateTest, test_count_if_nullable) {
+    //    const AggregateFunction* func = get_aggregate_function("count", TYPE_BOOLEAN, TYPE_BIGINT, true);
+    const AggregateFunction* func = get_aggregate_function("count", TYPE_BIGINT, TYPE_BIGINT, true);
+    auto state = ManagedAggrState::create(ctx, func);
+
+    auto data_column = BooleanColumn::create();
+    auto null_column = NullColumn::create();
+
+    for (int i = 0; i < 1024; i++) {
+        data_column->append(1);
+        null_column->append(1);
+    }
+
+    auto column = NullableColumn::create(std::move(data_column), std::move(null_column));
+
+    const Column* row_column = column.get();
+    func->update_batch_single_state(ctx, column->size(), &row_column, state->state());
+
+    int64_t result = *reinterpret_cast<int64_t*>(state->state());
+    ASSERT_EQ(512, result);
+}
+*/
+
+//TEST_F(AggregateTest, test_count_nullable_1) {
+//    using NullableCountIfInt64 = NullableAggregateFunctionState<CountIfFunctionState<TYPE_BOOLEAN>, false>;
+//    const AggregateFunction* func = get_aggregate_function("count_if", TYPE_BOOLEAN, TYPE_BIGINT, true);
+//    auto state = ManagedAggrState::create(ctx, func);
+//
+//    auto data_column = BooleanColumn::create();
+//    auto null_column = NullColumn::create();
+//
+//    uint8_t a = 1;
+//    for (int i = 0; i < 1024; i++) {
+//        data_column->append(a);
+//        null_column->append(1);
+//    }
+//
+//    auto column = NullableColumn::create(std::move(data_column), std::move(null_column));
+//
+//    const Column* row_column = column.get();
+//    func->update_batch_single_state(ctx, column->size(), &row_column, state->state());
+//
+//    auto* null_state = (NullableCountIfInt64*)state->state();
+//    int64_t result = *reinterpret_cast<const int64_t*>(null_state->nested_state());
+//    ASSERT_EQ(512, result);
+//}
+
+TEST_F(AggregateTest, test_count_if_nullable_2) {
+    using NullableCountIfInt64 = NullableAggregateFunctionState<CountIfFunctionState<TYPE_BOOLEAN>, false>;
+    const AggregateFunction* func = get_aggregate_function("count_if", TYPE_BOOLEAN, TYPE_BIGINT, true);
+    ASSERT_TRUE(func != nullptr);
+    auto state = ManagedAggrState::create(ctx, func);
+
+
+    auto data_column = BooleanColumn::create();
+    std::vector<uint8_t> values = {0, 1, 1, 0};
+    data_column->append_numbers(values.data(), values.size() * sizeof(uint8_t));
+    auto null_column = UInt8Column::create();
+    std::vector<uint8_t> nulls = {1, 0, 1, 0};
+    null_column->append_numbers(nulls.data(), nulls.size());
+    auto column = NullableColumn::create(data_column, null_column);
+
+
+//    auto data_column = Int32Column::create();
+//    auto null_column = NullColumn::create();
+//    for (int i = 0; i < 1024; i++) {
+//        data_column->append(1);
+//        null_column->append(i % 2 ? 1 : 0);
+//    }
+//    auto column = NullableColumn::create(std::move(data_column), std::move(null_column));
+
+    const Column* row_column = column.get();
+
+    func->update_batch_single_state(ctx, column->size(), &row_column, state->state());
+
+    auto* null_state = (NullableCountIfInt64*)state->state();
+    int64_t result = *reinterpret_cast<const int64_t*>(null_state->nested_state());
+    ASSERT_EQ(1, result);
 }
 
 TEST_F(AggregateTest, test_count_nullable) {
