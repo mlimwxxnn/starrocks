@@ -243,6 +243,8 @@ public class FunctionSet {
     public static final String VARIANCE_POP = "variance_pop";
     public static final String VAR_SAMP = "var_samp";
     public static final String VARIANCE_SAMP = "variance_samp";
+
+    public static final String DELTA_METHOD = "delta_method";
     public static final String ANY_VALUE = "any_value";
     public static final String STD = "std";
     public static final String HLL_UNION = "hll_union";
@@ -1142,6 +1144,13 @@ public class FunctionSet {
             addBuiltin(AggregateFunction.createBuiltin(VAR_POP,
                     Lists.newArrayList(t), Type.DOUBLE, Type.VARBINARY,
                     false, true, false));
+        }
+        for (Type t1 : STDDEV_ARG_TYPE) {
+            for (Type t2 : STDDEV_ARG_TYPE) {
+                addBuiltin(AggregateFunction.createBuiltin(DELTA_METHOD,
+                        Lists.newArrayList(t1, t2), Type.DOUBLE, Type.VARBINARY,
+                        false, true, false));
+            }
         }
     }
 

@@ -7,6 +7,51 @@ DISTRIBUTED BY HASH(`d1`)
 PROPERTIES(
   "replication_num" = "1"
 );
+
+
+
+CH
+CREATE TABLE delta_test
+(
+    x1 UInt32,
+    x2 UInt32
+)
+ENGINE = MergeTree
+order by (x1)
+
+
+
+/////////////
+
+
+CREATE TABLE `delta_test_billion` (
+  `x1` int not null,
+  `x2` int not null
+)
+DISTRIBUTED BY HASH(`x1`)
+PROPERTIES(
+  "replication_num" = "1"
+);
+
+insert into delta_test(x1, x2)
+values (2, 2),(0,1),(1,1),(0,1),(1,1),(0,1);
+
+INSERT INTO delta_10b(x1, x2) SELECT cast(rand(0) * 10 as int), cast(rand(1) * 10 as int) FROM TABLE(generate_series(1, 99*10000*10000));
+
+
+INSERT INTO delta_10b(x1, x2) SELECT cast(rand(0) * 10 as int), cast(rand(1) * 10 as int) FROM TABLE(generate_series(1, 1*10000*10000));
+
+CREATE TABLE `delta_10b` (
+  `x1` int not null,
+  `x2` int not null
+)
+DISTRIBUTED BY HASH(`x1`)
+PROPERTIES(
+  "replication_num" = "1"
+);
+
+insert into delta_test(x1, x2)
+values (2, 2),(0,1),(1,1),(0,1),(1,1),(0,1);
 -- result:
 -- !result
 INSERT INTO `next_day_test`(d1, d2)

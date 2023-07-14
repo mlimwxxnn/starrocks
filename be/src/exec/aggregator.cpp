@@ -350,11 +350,14 @@ Status Aggregator::prepare(RuntimeState* state, ObjectPool* pool, RuntimeProfile
             auto* func = get_aggregate_function(fn.name.function_name, arg_type.type, return_type.type,
                                                 is_input_nullable, fn.binary_type, state->func_version());
             if (func == nullptr) {
+                LOG(WARNING) << "func is nullptr: " << fn.name.function_name;
                 return Status::InternalError(
                         strings::Substitute("Invalid agg function plan: $0", fn.name.function_name));
             }
             VLOG_ROW << "get agg function " << func->get_name() << " serde_type " << serde_type << " return_type "
                      << return_type;
+            LOG(WARNING) << "get agg function " << func->get_name() << " serde_type " << serde_type << " return_type "
+                                                     << return_type;
             _agg_functions[i] = func;
         }
 

@@ -16,6 +16,7 @@
 #include "exprs/agg/factory/aggregate_factory.hpp"
 #include "exprs/agg/factory/aggregate_resolver.hpp"
 #include "exprs/agg/variance.h"
+#include "exprs/agg/delta_method.h"
 #include "types/logical_type.h"
 
 namespace starrocks {
@@ -45,6 +46,10 @@ struct StdDispatcher {
                     "stddev_pop", false, AggregateFactory::MakeStddevAggregateFunction<lt, false>());
             resolver->add_aggregate_mapping<lt, DevFromAveResultLT<lt>, VarState>(
                     "stddev_samp", false, AggregateFactory::MakeStddevAggregateFunction<lt, true>());
+
+
+            resolver->add_aggregate_mapping<lt, TYPE_DOUBLE, DeltaMethodAggregateState<RunTimeCppType<TYPE_DOUBLE>>>(
+                    "delta_method", false, AggregateFactory::MakeDeltaMethodAggregateFunction<lt, true>());
         }
     }
 };

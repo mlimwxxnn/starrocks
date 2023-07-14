@@ -22,41 +22,32 @@
 
 namespace starrocks {
 
-template <LogicalType LT, typename = guard::Guard>
-inline constexpr LogicalType DevFromAveResultLT = TYPE_DOUBLE;
-
-template <>
-inline constexpr LogicalType DevFromAveResultLT<TYPE_DECIMALV2, guard::Guard> = TYPE_DECIMALV2;
-
-template <LogicalType LT>
-inline constexpr LogicalType DevFromAveResultLT<LT, DecimalLTGuard<LT>> = TYPE_DECIMAL128;
-
 template <typename T>
-struct DevFromAveAggregateState {
-    // Average value.
-    T mean{};
-    // The square of the difference between
-    // each sample value and the average of all sample values.
-    // It's calculated incrementally.
-    T m2{};
-    // Items.
+struct DeltaMethodAggregateState {
     T x_sum{};
     T y_sum{};
+    T x_square_sum{};
+    T y_square_sum{};
+    T x_y_sum{};
     int64_t count = 0;
 };
 
-template <LogicalType LT, bool is_sample, typename T = RunTimeCppType<LT>,
-          LogicalType ResultLT = DevFromAveResultLT<LT>, typename TResult = RunTimeCppType<ResultLT>>
-class DevFromAveAggregateFunction
-        : public AggregateFunctionBatchHelper<DevFromAveAggregateState<TResult>,
-                                              DevFromAveAggregateFunction<LT, is_sample, T, ResultLT, TResult>> {
+template <LogicalType LT, bool is_sample, typename T = RunTimeCppType<TYPE_DOUBLE>,
+          LogicalType ResultLT = TYPE_DOUBLE, typename TResult = RunTimeCppType<ResultLT>>
+class DeltaMethodBaseAggregateFunction
+        : public AggregateFunctionBatchHelper<DeltaMethodAggregateState<T>,
+                                              DeltaMethodBaseAggregateFunction<LT, is_sample, T, ResultLT, TResult>> {
 public:
     using InputColumnType = RunTimeColumnType<LT>;
+    using InputCppType = RunTimeCppType<LT>;
     using ResultColumnType = RunTimeColumnType<ResultLT>;
 
     void reset(FunctionContext* ctx, const Columns& args, AggDataPtr state) const override {
-        this->data(state).mean = {};
-        this->data(state).m2 = {};
+        this->data(state).x_sum = {};
+        this->data(state).y_sum = {};
+        this->data(state).x_square_sum = {};
+        this->data(state).y_square_sum = {};
+        this->data(state).x_y_sum = {};
         this->data(state).count = 0;
     }
 
@@ -64,32 +55,24 @@ public:
                 size_t row_num) const override {
         DCHECK(columns[0]->is_numeric() || columns[0]->is_decimal());
 
-        const auto* column = down_cast<const InputColumnType*>(columns[0]);
+        this->data(state).count += 1;
 
-        int64_t temp = 1 + this->data(state).count;
+        T x;
+        T y;
+        const auto* x_column = down_cast<const InputColumnType*>(columns[0]);
+        const auto* y_column = down_cast<const InputColumnType*>(columns[1]);
+        x = x_column->get_data()[row_num];
+        this->data(state).x_sum += x;
+        this->data(state).x_square_sum += x * x;
 
-        TResult delta;
-        delta = column->get_data()[row_num] - this->data(state).mean;
+        y = y_column->get_data()[row_num];
+        this->data(state).y_sum += y;
+        this->data(state).y_square_sum += y * y;
 
-        TResult r;
-        if constexpr (lt_is_decimalv2<LT>) {
-            r = delta / DecimalV2Value(temp, 0);
-        } else if constexpr (lt_is_decimal128<LT>) {
-            r = (Decimal128P38S9(delta) / temp).value();
-        } else {
-            r = delta / temp;
-        }
+//        LOG(WARNING) << "update x: " << x << ", y: " << y;
 
-        this->data(state).mean += r;
-        if constexpr (lt_is_decimalv2<LT>) {
-            this->data(state).m2 += DecimalV2Value(this->data(state).count, 0) * delta * r;
-        } else if constexpr (lt_is_decimal128<LT>) {
-            this->data(state).m2 += this->data(state).count * (Decimal128P38S9(delta) * Decimal128P38S9(r)).value();
-        } else {
-            this->data(state).m2 += this->data(state).count * delta * r;
-        }
+        this->data(state).x_y_sum += x * y;
 
-        this->data(state).count = temp;
     }
 
     void update_batch_single_state_with_frame(FunctionContext* ctx, AggDataPtr __restrict state, const Column** columns,
@@ -103,41 +86,20 @@ public:
     void merge(FunctionContext* ctx, const Column* column, AggDataPtr __restrict state, size_t row_num) const override {
         DCHECK(column->is_binary());
         Slice slice = column->get(row_num).get_slice();
+        auto x_sum = unaligned_load<T>(slice.data);
+        auto y_sum = unaligned_load<T>(slice.data + sizeof(T));
+        auto x_square_sum = unaligned_load<T>(slice.data + sizeof(T) * 2);
+        auto y_square_sum = unaligned_load<T>(slice.data + sizeof(T) * 3);
+        auto x_y_sum = unaligned_load<T>(slice.data + sizeof(T) * 4);
+        int64_t count = *reinterpret_cast<int64_t*>(slice.data + sizeof(T) * 5);
 
-        auto mean = unaligned_load<TResult>(slice.data);
-        auto m2 = unaligned_load<TResult>(slice.data + sizeof(TResult));
-        int64_t count = *reinterpret_cast<int64_t*>(slice.data + sizeof(TResult) * 2);
 
-        TResult delta = this->data(state).mean - mean;
-
-        if constexpr (lt_is_decimalv2<LT>) {
-            DecimalV2Value count_state_decimal = DecimalV2Value(this->data(state).count, 0);
-            DecimalV2Value count_decimal = DecimalV2Value(count, 0);
-
-            TResult sum_count = count_state_decimal + count_decimal;
-            this->data(state).mean = mean + delta * (count_state_decimal / sum_count);
-            this->data(state).m2 =
-                    m2 + this->data(state).m2 + (delta * delta) * (count_decimal * count_state_decimal / sum_count);
-            this->data(state).count = sum_count;
-        } else if constexpr (lt_is_decimal128<LT>) {
-            TResult sum_count = this->data(state).count + count;
-            this->data(state).mean = (Decimal128P38S9(mean) +
-                                      Decimal128P38S9(delta) * (Decimal128P38S9(TResult(this->data(state).count)) /
-                                                                Decimal128P38S9(TResult(sum_count))))
-                                             .value();
-            this->data(state).m2 =
-                    m2 + this->data(state).m2 +
-                    ((Decimal128P38S9(delta) * Decimal128P38S9(delta)) *
-                     (Decimal128P38S9(TResult(count * this->data(state).count)) / Decimal128P38S9(TResult(sum_count))))
-                            .value();
-            this->data(state).count = sum_count;
-        } else {
-            TResult sum_count = this->data(state).count + count;
-            this->data(state).mean = mean + delta * (this->data(state).count / sum_count);
-            this->data(state).m2 =
-                    m2 + this->data(state).m2 + (delta * delta) * (count * this->data(state).count / sum_count);
-            this->data(state).count = sum_count;
-        }
+        this->data(state).x_sum += x_sum;
+        this->data(state).y_sum += y_sum;
+        this->data(state).x_square_sum += x_square_sum;
+        this->data(state).y_square_sum += y_square_sum;
+        this->data(state).x_y_sum += x_y_sum;
+        this->data(state).count += count;
     }
 
     void serialize_to_column(FunctionContext* ctx, ConstAggDataPtr __restrict state, Column* to) const override {
@@ -146,12 +108,15 @@ public:
         Bytes& bytes = column->get_bytes();
 
         size_t old_size = bytes.size();
-        size_t new_size = old_size + sizeof(TResult) * 2 + sizeof(int64_t);
+        size_t new_size = old_size + sizeof(T) * 5 + sizeof(int64_t);
         bytes.resize(new_size);
 
-        memcpy(bytes.data() + old_size, &(this->data(state).mean), sizeof(TResult));
-        memcpy(bytes.data() + old_size + sizeof(TResult), &(this->data(state).m2), sizeof(TResult));
-        memcpy(bytes.data() + old_size + sizeof(TResult) * 2, &(this->data(state).count), sizeof(int64_t));
+        memcpy(bytes.data() + old_size, &(this->data(state).x_sum), sizeof(T));
+        memcpy(bytes.data() + old_size + sizeof(T), &(this->data(state).y_sum), sizeof(T));
+        memcpy(bytes.data() + old_size + sizeof(T) * 2, &(this->data(state).x_square_sum), sizeof(T));
+        memcpy(bytes.data() + old_size + sizeof(T) * 3, &(this->data(state).y_square_sum), sizeof(T));
+        memcpy(bytes.data() + old_size + sizeof(T) * 4, &(this->data(state).x_y_sum), sizeof(T));
+        memcpy(bytes.data() + old_size + sizeof(T) * 5, &(this->data(state).count), sizeof(int64_t));
 
         column->get_offset().emplace_back(new_size);
     }
@@ -163,26 +128,29 @@ public:
         Bytes& bytes = dst_column->get_bytes();
         size_t old_size = bytes.size();
 
-        size_t one_element_size = sizeof(TResult) * 2 + sizeof(int64_t);
+        size_t one_element_size = sizeof(T) * 5 + sizeof(int64_t);
         bytes.resize(one_element_size * chunk_size);
         dst_column->get_offset().resize(chunk_size + 1);
 
         const auto* src_column = down_cast<const InputColumnType*>(src[0].get());
 
-        TResult mean = {};
-        TResult m2;
-        if constexpr (lt_is_decimalv2<LT>) {
-            m2 = DecimalV2Value(0, 0);
-        } else {
-            m2 = 0;
-        }
+        T x_sum = {};
+        T y_sum = 0;
+        T x_square_sum = 0;
+        T y_square_sum = 0;
+        T x_y_sum = 0;
+
+
 
         int64_t count = 1;
         for (size_t i = 0; i < chunk_size; ++i) {
-            mean = src_column->get_data()[i];
-            memcpy(bytes.data() + old_size, &mean, sizeof(TResult));
-            memcpy(bytes.data() + old_size + sizeof(TResult), &m2, sizeof(TResult));
-            memcpy(bytes.data() + old_size + sizeof(TResult) * 2, &count, sizeof(int64_t));
+            x_sum = src_column->get_data()[i];
+            memcpy(bytes.data() + old_size, &x_sum, sizeof(T));
+            memcpy(bytes.data() + old_size + sizeof(T), &y_sum, sizeof(T));
+            memcpy(bytes.data() + old_size + sizeof(T) * 2, &x_square_sum, sizeof(T));
+            memcpy(bytes.data() + old_size + sizeof(T) * 3, &y_square_sum, sizeof(T));
+            memcpy(bytes.data() + old_size + sizeof(T) * 4, &x_y_sum, sizeof(T));
+            memcpy(bytes.data() + old_size + sizeof(T) * 5, &count, sizeof(int64_t));
             old_size += one_element_size;
             dst_column->get_offset()[i + 1] = old_size;
         }
@@ -193,70 +161,55 @@ public:
 
 
 
-template <LogicalType LT, bool is_sample, typename T = RunTimeCppType<LT>,
-          LogicalType ResultLT = DevFromAveResultLT<LT>, typename TResult = RunTimeCppType<ResultLT>>
-class StddevAggregateFunction final : public DevFromAveAggregateFunction<LT, is_sample, T, ResultLT, TResult> {
+template <LogicalType LT, bool is_sample, typename T = RunTimeCppType<TYPE_DOUBLE>,
+          LogicalType ResultLT = TYPE_DOUBLE, typename TResult = RunTimeCppType<ResultLT>>
+class DeltaMethodAggregateFunction final : public DeltaMethodBaseAggregateFunction<LT, is_sample, T, ResultLT, TResult> {
 public:
     using ResultColumnType =
-            typename DevFromAveAggregateFunction<LT, is_sample, T, ResultLT, TResult>::ResultColumnType;
+            typename DeltaMethodBaseAggregateFunction<LT, is_sample, T, ResultLT, TResult>::ResultColumnType;
 
     void finalize_to_column(FunctionContext* ctx, ConstAggDataPtr __restrict state, Column* to) const override {
         DCHECK(to->is_numeric() || to->is_decimal());
+        double count = this->data(state).count * 1.0;
+        T x_sum = this->data(state).x_sum;
+        T y_sum = this->data(state).y_sum;
+        T x_square_sum = this->data(state).x_square_sum;
+        T y_square_sum = this->data(state).y_square_sum;
+        T x_y_sum = this->data(state).x_y_sum;
 
-        int64_t count = this->data(state).count;
+//        LOG(WARNING) << "finalize_to_column x_sum: " << x_sum;
+//        LOG(WARNING) << "finalize_to_column y_sum: " << y_sum;
+//        LOG(WARNING) << "finalize_to_column x_square_sum: " << x_square_sum;
+//        LOG(WARNING) << "finalize_to_column y_square_sum: " << y_square_sum;
+//        LOG(WARNING) << "finalize_to_column x_y_sum: " << x_y_sum;
+//        LOG(WARNING) << "finalize_to_column count: " << count;
+
+        DecimalV2Value result;
         if constexpr (lt_is_decimalv2<LT>) {
-            TResult result;
-            if constexpr (is_sample) {
-                if (count > 1) {
-                    result = this->data(state).m2 / DecimalV2Value(count - 1, 0);
-                    const double value = sqrt(static_cast<double>(result));
-                    result.assign_from_double(value);
-                    down_cast<ResultColumnType*>(to)->append(result);
-                } else {
-                    down_cast<ResultColumnType*>(to)->append(DecimalV2Value(0));
-                }
+            if (count > 1) {
+                result.assign_from_double(1.2345);
+                down_cast<ResultColumnType*>(to)->append(result);
             } else {
-                if (count > 0) {
-                    result = this->data(state).m2 / DecimalV2Value(count, 0);
-                    const double value = sqrt(static_cast<double>(result));
-                    result.assign_from_double(value);
-                    down_cast<ResultColumnType*>(to)->append(result);
-                } else {
-                    down_cast<ResultColumnType*>(to)->append(DecimalV2Value(0));
-                }
-            }
-        } else if constexpr (lt_is_decimal128<LT>) {
-            TResult result;
-            if constexpr (is_sample) {
-                if (count > 1) {
-                    auto double_val = (Decimal128P38S9(this->data(state).m2) / (count - 1)).double_value();
-                    result = Decimal128P38S9(sqrt(double_val)).value();
-                    down_cast<ResultColumnType*>(to)->append(result);
-                } else {
-                    down_cast<ResultColumnType*>(to)->append(TResult(0));
-                }
-            } else {
-                if (count > 0) {
-                    auto double_val = (Decimal128P38S9(this->data(state).m2) / count).double_value();
-                    result = Decimal128P38S9(sqrt(double_val)).value();
-                    down_cast<ResultColumnType*>(to)->append(result);
-                } else {
-                    down_cast<ResultColumnType*>(to)->append(TResult(0));
-                }
+                down_cast<ResultColumnType*>(to)->append(DecimalV2Value(0));
             }
         } else {
-            if constexpr (is_sample) {
-                if (count > 1) {
-                    down_cast<ResultColumnType*>(to)->append(sqrt(this->data(state).m2 / (count - 1)));
-                } else {
-                    down_cast<ResultColumnType*>(to)->append(0);
-                }
+            if (count > 1) {
+                double avg_x = x_sum / count;
+                double avg_y = y_sum / count;
+                double avg_x_y = x_y_sum / count;
+
+                double var_x = (x_square_sum - count * avg_x * avg_x) / (count - 1);
+                double var_y = (y_square_sum - count * avg_y * avg_y) / (count - 1);
+
+                double cov_x_y = (avg_x_y - avg_x * avg_y) * count / (count - 1);
+
+                const double value = (var_x / pow(avg_y, 2) +
+                                     var_y * pow(avg_x, 2) / pow(avg_y, 4) -
+                        2 * cov_x_y * avg_x / pow(avg_y, 3)) / count;
+                result.assign_from_double(value);
+                down_cast<ResultColumnType*>(to)->append(value);
             } else {
-                if (count > 0) {
-                    down_cast<ResultColumnType*>(to)->append(sqrt(this->data(state).m2 / count));
-                } else {
-                    down_cast<ResultColumnType*>(to)->append(0);
-                }
+                down_cast<ResultColumnType*>(to)->append(0);
             }
         }
     }
@@ -265,57 +218,39 @@ public:
                     size_t end) const override {
         DCHECK_GT(end, start);
 
-        TResult result;
+        DecimalV2Value result;
+        double count = this->data(state).count * 1.0;
+        T x_sum = this->data(state).x_sum;
+        T y_sum = this->data(state).y_sum;
+        T x_square_sum = this->data(state).x_square_sum;
+        T y_square_sum = this->data(state).y_square_sum;
+        T x_y_sum = this->data(state).x_y_sum;
 
-        int64_t count = this->data(state).count;
         if constexpr (lt_is_decimalv2<LT>) {
-            if constexpr (is_sample) {
-                if (count > 1) {
-                    result = this->data(state).m2 / DecimalV2Value(count - 1, 0);
-                    const double value = sqrt(static_cast<double>(result));
-                    result.assign_from_double(value);
-                } else {
-                    result = DecimalV2Value(0, 0);
-                }
+
+            if (count > 1) {
+                result.assign_from_double(1.2345);
             } else {
-                if (count > 0) {
-                    result = this->data(state).m2 / DecimalV2Value(count, 0);
-                    const double value = sqrt(static_cast<double>(result));
-                    result.assign_from_double(value);
-                } else {
-                    result = DecimalV2Value(0, 0);
-                }
+                result = DecimalV2Value(0, 0);
             }
-        } else if constexpr (lt_is_decimal128<LT>) {
-            if constexpr (is_sample) {
-                if (count > 1) {
-                    auto double_val = (Decimal128P38S9(this->data(state).m2) / (count - 1)).double_value();
-                    result = Decimal128P38S9(sqrt(double_val)).value();
-                } else {
-                    result = TResult(0);
-                }
-            } else {
-                if (count > 0) {
-                    auto double_val = (Decimal128P38S9(this->data(state).m2) / count).double_value();
-                    result = Decimal128P38S9(sqrt(double_val)).value();
-                } else {
-                    result = TResult(0);
-                }
-            }
+
         } else {
-            if constexpr (is_sample) {
-                if (count > 1) {
-                    result = sqrt(this->data(state).m2 / (count - 1));
-                } else {
-                    result = 0;
-                }
+            if (count > 1) {
+                double avg_x = x_sum / count;
+                double avg_y = y_sum / count;
+                double avg_x_y = x_y_sum / count;
+
+                double var_x = (x_square_sum - count * avg_x * avg_x) / (count - 1);
+                double var_y = (y_square_sum - count * avg_y * avg_y) / (count - 1);
+
+                double cov_x_y = (avg_x_y - avg_x * avg_y) * count / (count - 1);
+
+                const double value = (var_x / pow(avg_y, 2) +
+                                     var_y * pow(avg_x, 2) / pow(avg_y, 4) -
+                                     2 * cov_x_y * avg_x / pow(avg_y, 3)) / count;
+                result.assign_from_double(value);
             } else {
-                // 走这个分支
-                if (count > 0) {
-                    result = sqrt(this->data(state).m2 / count);
-                } else {
-                    result = 0;
-                }
+                result = DecimalV2Value(0, 0);
             }
         }
 

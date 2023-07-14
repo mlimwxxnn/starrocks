@@ -48,6 +48,7 @@
 #include "exprs/agg/stream/retract_maxmin.h"
 #include "exprs/agg/sum.h"
 #include "exprs/agg/variance.h"
+#include "exprs/agg/delta_method.h"
 #include "exprs/agg/window.h"
 #include "exprs/agg/window_funnel.h"
 #include "types/logical_type.h"
@@ -146,6 +147,9 @@ public:
 
     template <LogicalType LT, bool is_sample>
     static AggregateFunctionPtr MakeStddevAggregateFunction();
+
+    template <LogicalType LT, bool is_sample>
+    static AggregateFunctionPtr MakeDeltaMethodAggregateFunction();
 
     template <LogicalType LT>
     static auto MakeSumDistinctAggregateFunction();
@@ -316,6 +320,11 @@ AggregateFunctionPtr AggregateFactory::MakeVarianceAggregateFunction() {
 template <LogicalType LT, bool is_sample>
 AggregateFunctionPtr AggregateFactory::MakeStddevAggregateFunction() {
     return std::make_shared<StddevAggregateFunction<LT, is_sample>>();
+}
+
+template <LogicalType LT, bool is_sample>
+AggregateFunctionPtr AggregateFactory::MakeDeltaMethodAggregateFunction() {
+    return std::make_shared<DeltaMethodAggregateFunction<LT, is_sample>>();
 }
 
 template <LogicalType LT>

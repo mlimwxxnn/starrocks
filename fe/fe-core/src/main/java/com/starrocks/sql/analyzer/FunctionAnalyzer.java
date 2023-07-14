@@ -120,6 +120,20 @@ public class FunctionAnalyzer {
             return;
         }
 
+        if (fnName.getFunction().equals(FunctionSet.DELTA_METHOD)) {
+            // for multiple exprs count must be qualified with distinct
+            if (functionCallExpr.getChildren().size() < 1) {
+                throw new SemanticException(
+                        "delta_method must have args more than one: " + functionCallExpr.toSql(),
+                        functionCallExpr.getPos());
+            }
+            if (fnParams.isDistinct()) {
+                throw new SemanticException("delta_method does not support DISTINCT", functionCallExpr.getPos());
+            }
+
+            return;
+        }
+
         if (fnName.getFunction().equals(FunctionSet.GROUP_CONCAT)) {
             if (functionCallExpr.getChildren().size() > 2 || functionCallExpr.getChildren().isEmpty()) {
                 throw new SemanticException(
